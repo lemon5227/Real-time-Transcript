@@ -4,8 +4,11 @@
 
   var $ = function (selector) { return document.querySelector(selector); };
   var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var feed = $("#transcript-feed");
+  var feed = $("#subtitleStream");
   var emptyState = $("#empty-state");
+  var currentSentence = $("#current-sentence");
+  var currentText = $("#current-text");
+  var returnLatest = $("#return-latest");
   var startButton = $("#start-listening");
   var startLabel = $("#start-listening-label");
   var state = {
@@ -22,7 +25,13 @@
     sessionStartedAt: null,
     timer: null,
     capabilities: null,
-    mode: "auto"
+    mode: "auto",
+    sessionId: null,
+    provider: null,
+    model: null,
+    language: "en",
+    saveTimer: null,
+    finishing: false
   };
 
   function setStatus(kind, connection, model) {
@@ -97,8 +106,12 @@
 
   function addSegment(segment) {
     if (!segment || !segment.text) return;
-    state.segments.push(segment);
+    var isFinal = segment.is_final !== false;
+    currentText.textContent = segment.text;
+    currentSentence.classList.toggle("is-provisional", !isFinal);
     emptyState.hidden = true;
+    if (!isFinal) return;
+    state.segments.push(segment);
     var article = document.createElement("article");
     article.className = "transcript-segment";
     var time = document.createElement("time");
@@ -118,12 +131,16 @@
     feed.appendChild(article);
     $("#segment-count").textContent = state.segments.length;
     if ($("#autoscroll-toggle").checked) feed.scrollTop = feed.scrollHeight;
+    scheduleSessionSave();
   }
 
   function clearTranscript() {
     $$(".transcript-segment").forEach(function (node) { node.remove(); });
     state.segments = [];
     emptyState.hidden = false;
+    currentText.textContent = "开始听课后，当前句会在这里清晰显示。";
+    currentSentence.classList.remove("is-provisional");
+    returnLatest.hidden = true;
     $("#segment-count").textContent = "0";
   }
 
@@ -189,24 +206,31 @@
   }
 
   function persistSession(stopResult) {
-    var databaseRequest = window.indexedDB && window.indexedDB.open("echonote", 1);
-    if (!databaseRequest) return;
-    databaseRequest.onupgradeneeded = function () { databaseRequest.result.createObjectStore("sessions", { keyPath: "id" }); };
-    databaseRequest.onsuccess = function () {
-      var transaction = databaseRequest.result.transaction("sessions", "readwrite");
-      transaction.objectStore("sessions").put({
-        id: (stopResult && stopResult.session_id) || "session-" + Date.now(),
-        title: $("#course-title").value.trim() || "未命名课堂",
-        created_at: new Date().toISOString(),
-        duration_seconds: state.sessionStartedAt ? Math.round((Date.now() - state.sessionStartedAt) / 1000) : 0,
-        provider: stopResult && stopResult.provider,
-        model: stopResult && stopResult.model,
-        segments: (stopResult && stopResult.segments) || state.segments
-      });
+    if (!window.indexedDB || !window.EchoStore) return;
+    var result = stopResult || {};
+    var session = {
+      id: result.session_id || state.sessionId || "session-" + Date.now(),
+      title: $("#course-title").value.trim() || "未命名课堂",
+      createdAt: state.sessionStartedAt ? new Date(state.sessionStartedAt).toISOString() : new Date().toISOString(),
+      durationMs: state.sessionStartedAt ? Math.round(Date.now() - state.sessionStartedAt) : 0,
+      language: state.language,
+      provider: result.provider || state.provider || "unknown",
+      model: result.model || state.model || "",
+      segments: result.segments || state.segments
     };
+    state.sessionId = session.id;
+    window.EchoStore.saveSession(session).catch(function () { $("#feed-hint").textContent = "课堂仍在进行，但本地保存暂不可用"; });
+  }
+
+  function scheduleSessionSave() {
+    if (!state.sessionId || !window.EchoStore) return;
+    window.clearTimeout(state.saveTimer);
+    state.saveTimer = window.setTimeout(function () { persistSession(); }, 500);
   }
 
   function finishSession(result) {
+    if (state.finishing) return;
+    state.finishing = true;
     if (result && result.segments) {
       state.segments = [];
       $$(".transcript-segment").forEach(function (node) { node.remove(); });
@@ -215,6 +239,9 @@
     persistSession(result || {});
     releaseCapture();
     setRecordingUi(false);
+    window.clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+    state.finishing = false;
     setStatus("ready", "本次听课已保存", "可以前往课后复习");
   }
 
@@ -238,6 +265,10 @@
         }
         state.sequence = 0;
         state.sessionStartedAt = Date.now();
+        state.sessionId = result.session_id;
+        state.provider = result.provider;
+        state.model = result.model || payload.model;
+        state.language = payload.language;
         $("#model-status").textContent = (result.provider || "provider") + (result.model ? " · " + result.model : "");
         try {
           await beginCapture();
@@ -292,12 +323,34 @@
     dialog.addEventListener("click", function (event) { if (event.target === dialog) dialog.close(); });
   }
 
+  function setupTranscriptFollow() {
+    feed.addEventListener("scroll", function () {
+      var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24;
+      returnLatest.hidden = atBottom;
+      if (!atBottom) $("#autoscroll-toggle").checked = false;
+    });
+    returnLatest.addEventListener("click", function () {
+      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+      $("#autoscroll-toggle").checked = true;
+      returnLatest.hidden = true;
+    });
+    $("#autoscroll-toggle").addEventListener("change", function () {
+      if (this.checked) {
+        feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+        returnLatest.hidden = true;
+      }
+    });
+  }
+
   startButton.addEventListener("click", startListening);
   $("#clear-transcript").addEventListener("click", clearTranscript);
   setupModes();
   setupHelp();
+  setupTranscriptFollow();
   setupSocket();
   loadCapabilities();
+  window.startLecture = startListening;
+  window.stopLecture = stopListening;
   document.addEventListener("keydown", function (event) {
     var tag = document.activeElement && document.activeElement.tagName;
     if (event.key === " " && tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") { event.preventDefault(); startListening(); }

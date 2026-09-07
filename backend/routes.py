@@ -7,6 +7,7 @@ from .config import AppConfig
 from .device import device_public_dict, get_device_profile
 from .models import SessionConfig
 from .providers.local_whisper import local_model_available
+from .providers.base import ProviderError
 from .session_manager import SessionManager
 
 
@@ -72,6 +73,19 @@ def register_routes(app: Flask, config: AppConfig) -> None:
 
 def register_socket_handlers(socketio: SocketIO) -> None:
     """Register process-wide handlers that resolve state from the active app."""
+    def error_result(exc: Exception) -> dict:
+        if isinstance(exc, ProviderError):
+            error = exc.to_dict()
+        else:
+            message = str(exc)
+            code, _, detail = message.partition(":")
+            error = {
+                "code": code or "INVALID_REQUEST",
+                "message": detail.strip() or "请求无效",
+                "action": "检查设置后重试",
+            }
+        return {"status": "error", "error": error}
+
     @socketio.on("connect")
     def handle_connect():
         return {"status": "success"}
@@ -91,17 +105,22 @@ def register_socket_handlers(socketio: SocketIO) -> None:
         config = current_app.extensions["app_config"]
         payload = dict(data or {})
         mode = str(payload.get("mode") or config.transcription_mode)
-        session_config = SessionConfig(
-            mode=mode,
-            model=payload.get("model"),
-            language=str(payload.get("language") or "en"),
-            sample_rate=int(payload.get("sample_rate") or 16000),
-            enable_vad=bool(payload.get("enable_vad", True)),
-            window_seconds=float(payload.get("window_seconds") or config.audio_window_seconds),
-            overlap_seconds=float(payload.get("overlap_seconds") or config.audio_overlap_seconds),
-            max_queue=config.audio_max_queue,
-        )
-        result = manager.start(flask_request.sid, session_config)
+        try:
+            session_config = SessionConfig(
+                mode=mode,
+                model=payload.get("model"),
+                language=str(payload.get("language") or "en"),
+                sample_rate=int(payload.get("sample_rate") or 16000),
+                enable_vad=bool(payload.get("enable_vad", True)),
+                window_seconds=float(payload.get("window_seconds") or config.audio_window_seconds),
+                overlap_seconds=float(payload.get("overlap_seconds") or config.audio_overlap_seconds),
+                max_queue=config.audio_max_queue,
+            )
+            result = manager.start(flask_request.sid, session_config)
+        except (ProviderError, ValueError, TypeError) as exc:
+            result = error_result(exc)
+            socketio.emit("transcription_error", result["error"], to=flask_request.sid)
+            return result
         socketio.emit("transcription_started", result, to=flask_request.sid)
         return result
 
@@ -111,12 +130,17 @@ def register_socket_handlers(socketio: SocketIO) -> None:
 
         manager = current_app.extensions["session_manager"]
         payload = dict(data or {})
-        manager.push_audio(
-            flask_request.sid,
-            encoded_audio=str(payload.get("audio") or ""),
-            sample_rate=int(payload.get("sample_rate") or 16000),
-            sequence=int(payload.get("sequence") or 0),
-        )
+        try:
+            manager.push_audio(
+                flask_request.sid,
+                encoded_audio=str(payload.get("audio") or ""),
+                sample_rate=int(payload.get("sample_rate") or 16000),
+                sequence=int(payload.get("sequence") or 0),
+            )
+        except (ProviderError, ValueError, TypeError) as exc:
+            result = error_result(exc)
+            socketio.emit("transcription_error", result["error"], to=flask_request.sid)
+            return result
         return {"status": "accepted"}
 
     @socketio.on("stop_transcription")

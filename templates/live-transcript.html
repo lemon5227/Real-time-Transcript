@@ -6,9 +6,6 @@
     <meta name="theme-color" content="#0b1020">
     <title>EchoNote · 实时课堂转录</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   </head>
   <body data-testid="live-workbench">
@@ -62,7 +59,11 @@
                 <button class="text-button" id="clear-transcript" type="button">清空</button>
               </div>
             </div>
-            <div id="transcript-feed" class="transcript-feed" aria-live="polite" aria-label="实时字幕内容">
+            <div class="current-sentence" id="current-sentence" aria-live="polite">
+              <span class="current-label">NOW / 当前句</span>
+              <p id="current-text">开始听课后，当前句会在这里清晰显示。</p>
+            </div>
+            <div id="subtitleStream" class="transcript-feed" aria-live="polite" aria-label="实时字幕历史">
               <div class="empty-state" id="empty-state">
                 <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span><b>⌁</b></div>
                 <p class="empty-kicker">YOUR STUDY COMPANION</p>
@@ -70,6 +71,7 @@
                 <p>点击下方按钮开始。字幕会在这里安静地跟上课堂，<br>你可以随时暂停、回看或在课后整理重点。</p>
               </div>
             </div>
+            <button class="return-latest" id="return-latest" type="button" hidden>↓ 回到最新</button>
             <div class="feed-footer"><span><kbd>Space</kbd> 开始 / 停止</span><span id="feed-hint">建议戴耳机，开启清晰输入</span></div>
           </div>
         </section>
@@ -120,6 +122,7 @@
 
     <dialog id="help-dialog" class="help-dialog"><button class="dialog-close" id="close-help" type="button" aria-label="关闭">×</button><p class="eyebrow">QUICK GUIDE</p><h2>把注意力留给课堂</h2><div class="shortcut-row"><kbd>Space</kbd><span>开始 / 停止听课</span></div><div class="shortcut-row"><kbd>⌘ K</kbd><span>聚焦课程标记</span></div><p class="dialog-footnote">建议在课前先打开页面，选择最适合你设备的推理路径。</p></dialog>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='storage.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>
