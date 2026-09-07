@@ -36,6 +36,7 @@ def _parse_float(value: str, name: str, minimum: float) -> float:
 
 @dataclass(frozen=True)
 class AppConfig:
+    secret_key: str
     host: str
     port: int
     debug: bool
@@ -121,6 +122,8 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         raise ValueError("CLOUD_API_KEY is required when CLOUD_BASE_URL is set")
 
     return AppConfig(
+        secret_key=source.get("SECRET_KEY", "development-only-change-me").strip()
+        or "development-only-change-me",
         host=host,
         port=port,
         debug=debug,
