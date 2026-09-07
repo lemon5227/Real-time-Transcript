@@ -1,4 +1,3 @@
-import base64
 import queue
 import threading
 import uuid
@@ -9,9 +8,8 @@ import numpy as np
 
 from .audio_pipeline import AudioWindow, AudioWindowBuffer, decode_pcm16_base64
 from .models import SessionConfig, TranscriptSegment
-from .segment_merger import SegmentMerger
 from .providers.base import ProviderError, TranscriptionProvider
-
+from .segment_merger import SegmentMerger
 
 ProviderFactoryType = Union[Callable[[SessionConfig], TranscriptionProvider], object]
 EmitCallback = Callable[[str, str, Dict[str, object]], None]

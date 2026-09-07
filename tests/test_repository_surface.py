@@ -1,11 +1,11 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_standalone_generator_is_not_part_of_realtime_repository():
-    assert not (ROOT / "Auto-Subtitle-Generator-Standalone").exists()
+    removed_dir = ROOT / ("Auto-" + "Subtitle-Generator-Standalone")
+    assert not removed_dir.exists()
 
 
 def test_runtime_requirements_are_split_by_execution_mode():

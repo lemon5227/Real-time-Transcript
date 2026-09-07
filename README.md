@@ -1,46 +1,70 @@
 # Real-time Transcript
 
-面向留学生听课和课后复习的实时语音转录工作台。应用优先在本地运行，也支持把音频窗口发送到用户配置的云端转录服务。
+面向留学生听课和课后复习的实时转录工作台。它把“听不清、跟不上、课后找不到重点”拆成一条简单的学习流：课上实时字幕，课后可搜索、编辑、标记和导出。
 
-## 能做什么
+> The product is designed for international students: a low-distraction live caption view during class, plus a local post-class review workspace.
 
-- 麦克风实时转录，支持中文、英文、日语、韩语等课堂语言。
-- 自动处理 44.1kHz/48kHz 麦克风并统一为 16kHz 单声道音频。
-- 本地模式使用 `faster-whisper`；轻薄本可以选择云端模式，避免安装大型本地模型。
-- 自动模式根据本地模型和云端配置选择 provider，并在界面中显示实际选择结果。
-- 课后复习支持本地会话保存、搜索、编辑、重点标记、笔记和 TXT/Markdown/VTT/SRT 导出。
+## What it does
 
-## 安装
+- Realtime microphone transcription for English, Chinese, Japanese, Korean and other Whisper-supported languages.
+- Browser audio is normalized to mono 16 kHz; common 44.1/48 kHz microphones are accepted.
+- Local mode uses `faster-whisper` when available and keeps audio on the computer.
+- Cloud mode sends short audio windows to the endpoint configured by the user, which makes the app practical on thin laptops.
+- Auto mode tries local startup first and falls back to the configured cloud provider when local model loading fails.
+- Post-class review stores sessions in browser IndexedDB, with search, inline edits, notes, starred segments and TXT/Markdown/VTT/SRT export.
 
-核心环境（只提供服务和云端接入边界）：
+## Install
+
+Python 3.9+ is supported. `ffmpeg` is not required for microphone transcription.
 
 ```bash
+git clone https://github.com/lemon5227/Real-time-Transcript.git
+cd Real-time-Transcript
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements-core.txt
-```
-
-云端模式：
-
-```bash
-pip install -r requirements-cloud.txt
 cp .env.example .env
 ```
 
-本地模式：
+For local mode, install the optional runtime (model weights download on first use):
 
 ```bash
 pip install -r requirements-local.txt
-cp .env.example .env
 ```
 
-开发和测试：
+For cloud mode, install the HTTP client:
+
+```bash
+pip install -r requirements-cloud.txt
+```
+
+For development and tests:
 
 ```bash
 pip install -r requirements-dev.txt
 ```
 
-系统只需要 Python 3.9+。使用本地模型时，`faster-whisper` 会根据实际环境选择 CPU、CUDA 或 Apple Silicon 支持；云端模式不导入 torch。
+## Choose a runtime
 
-## 启动
+| Runtime | When to choose it | Audio leaves the computer? |
+| --- | --- | --- |
+| Auto | Default; local first, cloud fallback | Only if local startup fails and cloud is configured |
+| Local | Privacy, stable offline use, capable CPU/GPU | No |
+| Cloud | Thin laptop, low memory, no local model runtime | Yes, to your configured endpoint |
+
+Cloud variables belong in the backend `.env` only:
+
+```dotenv
+TRANSCRIPTION_MODE=auto
+CLOUD_BASE_URL=https://api.example.com/v1
+CLOUD_API_KEY=your-key
+CLOUD_TRANSCRIPTION_MODEL=your-transcription-model
+CLOUD_TIMEOUT_SECONDS=30
+```
+
+The browser never receives `CLOUD_API_KEY`. The UI makes the current path visible and displays a privacy notice when cloud mode is selected. Read [`docs/PRIVACY.md`](docs/PRIVACY.md) before using a third-party endpoint.
+
+## Start
 
 ```bash
 ./start.sh --mode auto
@@ -48,26 +72,26 @@ pip install -r requirements-dev.txt
 ./start.sh --mode cloud
 ```
 
-打开 `http://127.0.0.1:5001/` 开始听课，打开 `http://127.0.0.1:5001/review` 进入课后复习。
+Open [http://127.0.0.1:5001/](http://127.0.0.1:5001/) for the live lecture workspace. Use [http://127.0.0.1:5001/review](http://127.0.0.1:5001/review) for post-class review.
 
-云端模式需要在后端 `.env` 设置：
+Recommended classroom flow:
 
-```dotenv
-CLOUD_BASE_URL=https://api.example.com/v1
-CLOUD_API_KEY=your-key
-CLOUD_TRANSCRIPTION_MODEL=your-transcription-model
-```
+1. Open the live page before class and enter a course label.
+2. Select `auto`, `local`, or `cloud`; check the detected device/provider message.
+3. Click **开始听课** and allow microphone access. The current sentence is large and bright; confirmed history remains scrollable.
+4. Stop after class. The final session is saved locally and can be searched, edited, starred, annotated or exported from **课后复习**.
 
-API Key 只保存在后端环境变量中，不会返回给浏览器或写入日志。选择云端模式时，页面会明确提示音频将发送到配置的服务。
+## Troubleshooting
 
-## API
+- The local model is too slow or fails to load: choose a smaller model, use `--mode cloud`, or configure cloud variables and keep `--mode auto`.
+- The browser cannot hear audio: use a secure browser context or localhost, allow the microphone, and check the selected input device.
+- Cloud requests fail: verify the base URL includes the provider API root, the key/model are valid, and the service accepts `POST /audio/transcriptions`.
+- No review records appear: allow IndexedDB/local storage for `127.0.0.1`; live transcription itself does not depend on the review database.
 
-- `GET /api/health`：服务健康状态。
-- `GET /api/capabilities`：设备、本地模型和云端配置能力，不返回密钥。
-- `GET /api/models`：本地模型目录和可用状态。
-- `GET /api/config/public`：前端可展示的非敏感配置。
-- Socket.IO：`start_transcription`、`audio_chunk`、`stop_transcription`。
+See [`QUICKSTART.md`](QUICKSTART.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`docs/API.md`](docs/API.md) and [`docs/PRIVACY.md`](docs/PRIVACY.md).
 
-详细契约见 [`docs/API.md`](docs/API.md)，隐私说明见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+Runtime discovery is available at `/api/capabilities`; the live page is `/` and the review page is `/review`.
 
-离线视频字幕生成器已经独立维护在 [Auto-Subtitle-on-Generative-AI](https://github.com/lemon5227/Auto-Subtitle-on-Generative-AI)，本项目不导入它的运行时代码或依赖。
+## Project boundary
+
+This repository is only the realtime lecture transcription product. The separate video/offline subtitle project is maintained at [Auto-Subtitle-on-Generative-AI](https://github.com/lemon5227/Auto-Subtitle-on-Generative-AI); this project does not import its runtime code, templates or dependencies.

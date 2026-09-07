@@ -6,10 +6,8 @@ from flask_socketio import SocketIO
 from .config import AppConfig
 from .device import device_public_dict, get_device_profile
 from .models import SessionConfig
-from .providers.local_whisper import local_model_available
 from .providers.base import ProviderError
-from .session_manager import SessionManager
-
+from .providers.local_whisper import local_model_available
 
 LOCAL_MODELS = (
     {"id": "tiny", "label": "Tiny", "size": "~75MB", "best_for": "低配 CPU"},

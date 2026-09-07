@@ -14,7 +14,6 @@ from .providers.factory import ProviderFactory
 from .routes import register_routes, register_socket_handlers
 from .session_manager import SessionManager
 
-
 socketio = SocketIO(async_mode="threading", cors_allowed_origins="*")
 
 

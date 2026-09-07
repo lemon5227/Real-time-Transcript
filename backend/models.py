@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-
 SUPPORTED_SAMPLE_RATES: Tuple[int, ...] = (8000, 16000, 22050, 32000, 44100, 48000)
 SUPPORTED_MODES: Tuple[str, ...] = ("auto", "local", "cloud")
 

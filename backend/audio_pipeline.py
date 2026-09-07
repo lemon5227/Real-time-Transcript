@@ -7,7 +7,6 @@ import numpy as np
 
 from .models import SUPPORTED_SAMPLE_RATES
 
-
 TARGET_SAMPLE_RATE = 16000
 
 

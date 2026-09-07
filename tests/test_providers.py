@@ -6,8 +6,7 @@ import pytest
 from backend.config import load_config
 from backend.models import SessionConfig
 from backend.providers.base import ProviderError
-from backend.providers.factory import AutoFallbackProvider
-from backend.providers.factory import ProviderFactory
+from backend.providers.factory import AutoFallbackProvider, ProviderFactory
 
 
 class FakeResponse:
