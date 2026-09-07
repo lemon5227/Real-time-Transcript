@@ -1,4 +1,4 @@
-#!/bin/bash
-# Start Real-time Transcription Server
+#!/usr/bin/env bash
+set -euo pipefail
 
-python3 app.py
+exec "$(dirname "$0")/start.sh" "$@"
