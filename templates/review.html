@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b1020">
+    <title>EchoNote · 课后复习</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="review-body">
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+    <div class="app-frame">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="EchoNote 首页"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M16 5.5a7 7 0 0 0-7 7v4a7 7 0 0 0 14 0v-4a7 7 0 0 0-7-7Z" stroke="currentColor" stroke-width="2.2"/><path d="M5.8 16.2a10.2 10.2 0 0 0 20.4 0M16 26.4v3.1M11.5 29.5h9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span class="brand-copy"><strong>EchoNote</strong><small>lecture, made legible</small></span></a>
+        <nav class="primary-nav" aria-label="主导航"><a class="nav-item" href="/"><span class="nav-glyph">◉</span>实时听课</a><a class="nav-item is-active" href="/review" aria-current="page"><span class="nav-glyph">↗</span>课后复习</a></nav>
+        <div class="topbar-actions"><span class="privacy-badge"><span class="privacy-lock">⌁</span>本地保存</span><a class="icon-button back-button" href="/" aria-label="返回实时听课" title="返回实时听课">←</a></div>
+      </header>
+
+      <main class="review-workspace">
+        <section class="review-intro"><p class="eyebrow"><span class="eyebrow-line"></span>AFTER CLASS / 课后复习</p><h1>把听过的课，<br><em>变成自己的话。</em></h1><p class="intro-copy">在这里回到课堂，找出没听清的句子，<br>标记值得重看的地方，再慢慢补上你的理解。</p></section>
+
+        <section class="review-layout" aria-label="课堂笔记库">
+          <aside class="library-panel">
+            <div class="library-heading"><div><p class="eyebrow">YOUR LIBRARY</p><h2>课堂笔记</h2></div><span id="session-count" class="count-badge">0</span></div>
+            <label class="search-wrap" for="searchInput"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索课程、字幕或笔记" autocomplete="off"><kbd>/</kbd></label>
+            <div class="filter-tabs" role="group" aria-label="筛选课堂笔记"><button class="filter-tab is-selected" type="button" data-filter="all">全部</button><button class="filter-tab" type="button" data-filter="starred">已标记</button><button class="filter-tab" type="button" data-filter="notes">有笔记</button></div>
+            <div id="sessionList" class="session-list" aria-live="polite"><div class="list-empty"><span>◌</span><p>还没有课堂笔记</p><small>完成一次听课后，它们会出现在这里。</small></div></div>
+          </aside>
+
+          <section class="review-detail" aria-labelledby="review-title">
+            <div id="reviewNotice" class="review-notice" role="status" aria-live="polite" hidden></div>
+            <div id="detailEmpty" class="detail-empty"><div class="empty-orbit small-orbit" aria-hidden="true"><span></span><span></span><span></span><b>↗</b></div><p class="eyebrow">A QUIET PLACE TO RETURN</p><h2>选择一节课<br>开始复习。</h2><p>左边是你的课堂记录。每一段字幕都可以编辑、标记和补充笔记。</p><a href="/" class="solid-link">开始一节新课 <span>↗</span></a></div>
+            <div id="detailContent" hidden>
+              <div class="detail-heading"><div><span class="detail-kicker">LECTURE NOTE / 课堂记录</span><input id="review-title" class="review-title-input" type="text" maxlength="80" aria-label="课堂标题"><div id="review-meta" class="review-meta"></div></div><button id="delete-session" class="delete-button" type="button">删除记录</button></div>
+              <div class="detail-toolbar"><div class="detail-summary"><strong id="review-segment-count">0</strong><span>段字幕</span><span class="toolbar-divider"></span><span id="review-duration">00:00</span><span>课堂时长</span></div><div class="export-actions" aria-label="导出课堂笔记"><button type="button" class="export-button" data-format="txt">TXT</button><button type="button" class="export-button" data-format="md">MD</button><button type="button" class="export-button" data-format="vtt">VTT</button><button type="button" class="export-button" data-format="srt">SRT</button></div></div>
+              <div id="reviewStream" class="review-stream" data-note-input="noteInput"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="{{ url_for('static', filename='storage.js') }}"></script>
+    <script src="{{ url_for('static', filename='export.js') }}"></script>
+    <script src="{{ url_for('static', filename='review.js') }}"></script>
+  </body>
+</html>
