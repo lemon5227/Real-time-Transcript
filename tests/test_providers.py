@@ -6,6 +6,7 @@ import pytest
 from backend.config import load_config
 from backend.models import SessionConfig
 from backend.providers.base import ProviderError
+from backend.providers.factory import AutoFallbackProvider
 from backend.providers.factory import ProviderFactory
 
 
@@ -74,3 +75,44 @@ def test_cloud_provider_posts_audio_without_logging_secret(monkeypatch):
     segments = provider.push(np.zeros(16000, dtype=np.float32))
     assert segments[0].text == "Cloud result"
     assert captured["headers"]["Authorization"] == "Bearer secret-value"
+
+
+def test_auto_provider_falls_back_when_local_model_cannot_start():
+    class FailingLocal:
+        name = "local"
+        model = "small"
+
+        def start(self, _config):
+            raise ProviderError("LOCAL_MODEL_LOAD_FAILED", "本地模型加载失败")
+
+        def push(self, _audio):
+            raise AssertionError("local provider must not receive audio after fallback")
+
+        def flush(self):
+            return []
+
+        def close(self):
+            self.closed = True
+
+    class WorkingCloud:
+        name = "cloud"
+        model = "cloud-model"
+
+        def start(self, _config):
+            self.started = True
+
+        def push(self, _audio):
+            return []
+
+        def flush(self):
+            return []
+
+        def close(self):
+            self.closed = True
+
+    cloud = WorkingCloud()
+    provider = AutoFallbackProvider(FailingLocal(), cloud)
+    provider.start(object())
+    assert provider.name == "cloud"
+    assert provider.model == "cloud-model"
+    assert cloud.started is True

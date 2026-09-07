@@ -8,6 +8,60 @@ from .cloud_transcription import CloudTranscriptionProvider
 from .local_whisper import LocalWhisperProvider, local_model_available
 
 
+class AutoFallbackProvider:
+    """Start locally first, then use cloud when local loading is not viable."""
+
+    name = "auto"
+    model = None
+
+    def __init__(self, local: TranscriptionProvider, cloud: TranscriptionProvider):
+        self._local = local
+        self._cloud = cloud
+        self._active: Optional[TranscriptionProvider] = None
+        self._local_error: Optional[Exception] = None
+
+    def start(self, config: SessionConfig) -> None:
+        try:
+            self._local.start(config)
+            self._active = self._local
+            self.name = getattr(self._local, "name", "local")
+            self.model = getattr(self._local, "model", None)
+            return
+        except Exception as exc:
+            self._local_error = exc
+            try:
+                self._local.close()
+            except Exception:
+                pass
+
+        try:
+            self._cloud.start(config)
+        except Exception as cloud_error:
+            raise ProviderError(
+                "AUTO_PROVIDER_FAILED",
+                "本地模型无法启动，云端 provider 也不可用",
+                "降低本地模型大小、检查云端配置，或单独选择可用模式",
+            ) from cloud_error
+        self._active = self._cloud
+        self.name = getattr(self._cloud, "name", "cloud")
+        self.model = getattr(self._cloud, "model", None)
+
+    def push(self, audio):
+        if self._active is None:
+            raise ProviderError("AUTO_SESSION_NOT_STARTED", "自动 provider 尚未启动")
+        return self._active.push(audio)
+
+    def flush(self):
+        if self._active is None:
+            return []
+        return self._active.flush()
+
+    def close(self):
+        if self._active is not None:
+            self._active.close()
+        self._active = None
+
+
 class ProviderFactory:
     def __init__(
         self,
@@ -37,10 +91,13 @@ class ProviderFactory:
             return self._create_cloud()
 
         if self._local_available(local_model):
-            return LocalWhisperProvider(
+            local_provider = LocalWhisperProvider(
                 model_name=local_model,
                 device_profile=self._device_profile,
             )
+            if self.config.cloud_configured:
+                return AutoFallbackProvider(local_provider, self._create_cloud())
+            return local_provider
         if self.config.cloud_configured:
             return self._create_cloud()
         raise ProviderError(
