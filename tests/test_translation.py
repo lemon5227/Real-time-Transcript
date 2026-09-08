@@ -8,6 +8,8 @@ from backend.translation import (
     ModelTranslationProvider,
     TranslationRouter,
 )
+from backend import create_app, socketio
+from backend.models import TranscriptSegment
 
 
 class FakeResponse:
@@ -126,3 +128,99 @@ def test_missing_provider_is_actionable():
     router = TranslationRouter()
     with pytest.raises(ProviderError, match="TRANSLATION_NOT_CONFIGURED"):
         router.resolve(mode="fast", provider="google", local_ready=False)
+
+
+class FakeTranslationProvider:
+    name = "fake"
+    mode = "fast"
+    model = None
+
+    def translate_batch(self, texts, _source_language, _target_language):
+        return ["译文: " + text for text in texts]
+
+
+class FakeTranslationRouter:
+    def __init__(self):
+        self.provider = FakeTranslationProvider()
+
+    def resolve(self, **_kwargs):
+        from backend.translation import TranslationSelection
+
+        return TranslationSelection(self.provider, "fake", "fast")
+
+
+class FakeTranscriptionProvider:
+    name = "fake"
+    model = "fake-model"
+
+    def start(self, _config):
+        return None
+
+    def push(self, _audio):
+        return [TranscriptSegment("segment-1", "hello lecture", 0, 1000, True)]
+
+    def flush(self):
+        return []
+
+    def close(self):
+        return None
+
+
+def test_batch_translation_endpoint_returns_segment_metadata():
+    app = create_app({}, provider_factory=lambda _config: FakeTranscriptionProvider(), translation_router=FakeTranslationRouter())
+
+    response = app.test_client().post(
+        "/api/translate",
+        json={
+            "segments": [{"id": "segment-1", "text": "hello lecture"}],
+            "source_language": "en",
+            "target_language": "zh",
+            "mode": "fast",
+            "provider": "fake",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["translations"][0] == {
+        "segment_id": "segment-1",
+        "target_language": "zh",
+        "text": "译文: hello lecture",
+        "status": "ready",
+        "mode": "fast",
+        "provider": "fake",
+        "model": None,
+    }
+
+
+def test_socket_translation_uses_server_segment_text():
+    app = create_app({}, provider_factory=lambda _config: FakeTranscriptionProvider(), translation_router=FakeTranslationRouter())
+    client = socketio.test_client(app)
+    assert client.emit(
+        "start_transcription",
+        {"mode": "local", "model": "fake", "language": "en", "sample_rate": 16000, "window_seconds": 0.2, "overlap_seconds": 0.01},
+        callback=True,
+    )["status"] == "success"
+
+    import base64
+    import struct
+    import time
+
+    pcm = struct.pack("<" + "h" * 3200, *([0] * 3200))
+    client.emit("audio_chunk", {"audio": base64.b64encode(pcm).decode(), "sample_rate": 16000, "sequence": 0})
+    time.sleep(0.1)
+    result = client.emit(
+        "translate_segments",
+        {
+            "segment_ids": ["segment-1"],
+            "source_language": "en",
+            "target_language": "zh",
+            "mode": "fast",
+            "provider": "fake",
+        },
+        callback=True,
+    )
+
+    assert result["status"] == "success"
+    assert result["translations"][0]["text"] == "译文: hello lecture"
+    client.disconnect()

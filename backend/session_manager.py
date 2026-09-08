@@ -134,6 +134,22 @@ class SessionManager:
     def cleanup(self, sid: str) -> None:
         self.stop(sid)
 
+    def translation_segments(self, sid: str, segment_ids: List[str]) -> List[Dict[str, object]]:
+        with self._lock:
+            state = self._sessions.get(sid)
+            if state is None:
+                raise ValueError("SESSION_NOT_ACTIVE: no active transcription session")
+            by_id = {segment.id: segment for segment in state.merger.all_segments()}
+        if not segment_ids or any(segment_id not in by_id for segment_id in segment_ids):
+            raise ValueError("TRANSLATION_SEGMENT_NOT_FOUND: segment is not part of this session")
+        result = []
+        for segment_id in segment_ids:
+            segment = by_id[segment_id]
+            if not segment.is_final:
+                raise ValueError("TRANSLATION_SEGMENT_NOT_FINAL: only final segments can be translated")
+            result.append({"id": segment.id, "text": segment.text})
+        return result
+
     def _make_provider(self, config: SessionConfig) -> TranscriptionProvider:
         factory = self._provider_factory
         if hasattr(factory, "create"):

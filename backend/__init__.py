@@ -10,9 +10,13 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 from .config import AppConfig, load_config
+from .model_manager import ModelManager
 from .providers.factory import ProviderFactory
-from .routes import register_routes, register_socket_handlers
+from .routes import LOCAL_MODELS, register_routes, register_socket_handlers
 from .session_manager import SessionManager
+from .translation import ModelTranslationProvider, TranslationRouter
+from .providers.google_translation import GoogleTranslationProvider
+from .providers.microsoft_translation import MicrosoftTranslationProvider
 
 socketio = SocketIO(async_mode="threading", cors_allowed_origins="*")
 
@@ -22,6 +26,7 @@ def create_app(
     *,
     config: Optional[AppConfig] = None,
     provider_factory=None,
+    translation_router=None,
 ) -> Flask:
     """Create a lightweight Flask app without importing model runtimes."""
     app_config = config or load_config(environ)
@@ -41,8 +46,12 @@ def create_app(
         provider_factory or ProviderFactory(app_config),
         emit=lambda sid, event, payload: socketio.emit(event, payload, to=sid),
     )
+    model_manager = ModelManager(LOCAL_MODELS)
+    translation_router = translation_router or _create_translation_router(app_config)
     app.extensions["app_config"] = app_config
     app.extensions["session_manager"] = manager
+    app.extensions["model_manager"] = model_manager
+    app.extensions["translation_router"] = translation_router
     register_routes(app, app_config)
     if not getattr(socketio, "_rtt_handlers_registered", False):
         register_socket_handlers(socketio)
@@ -52,3 +61,39 @@ def create_app(
 
 
 __all__ = ["create_app", "socketio"]
+
+
+def _create_translation_router(config: AppConfig) -> TranslationRouter:
+    return TranslationRouter(
+        google=(
+            GoogleTranslationProvider(
+                project_id=config.translation_google_project_id,
+                api_key=config.translation_google_api_key,
+                location=config.translation_google_location,
+                timeout_seconds=config.translation_timeout_seconds,
+            )
+            if config.translation_google_configured
+            else None
+        ),
+        microsoft=(
+            MicrosoftTranslationProvider(
+                endpoint=config.translation_microsoft_endpoint,
+                api_key=config.translation_microsoft_api_key,
+                region=config.translation_microsoft_region,
+                timeout_seconds=config.translation_timeout_seconds,
+            )
+            if config.translation_microsoft_configured
+            else None
+        ),
+        cloud=(
+            ModelTranslationProvider(
+                name="cloud",
+                model=config.translation_cloud_model,
+                base_url=config.translation_cloud_base_url,
+                api_key=config.translation_cloud_api_key,
+                timeout_seconds=config.translation_timeout_seconds,
+            )
+            if config.translation_cloud_configured
+            else None
+        ),
+    )
