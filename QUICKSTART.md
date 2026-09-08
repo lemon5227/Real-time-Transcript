@@ -20,6 +20,8 @@ pip install -r requirements-local.txt
 ./start.sh --mode local
 ```
 
+For English lectures on a Mac/MPS laptop, choose `Distil Small EN` in the classroom page. It is a lightweight faster-whisper model downloaded on first use. Other languages should use the multilingual `Base` or `Small` model.
+
 For a cloud endpoint:
 
 ```bash

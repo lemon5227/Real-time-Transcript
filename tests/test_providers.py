@@ -1,4 +1,6 @@
 import importlib
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -52,6 +54,51 @@ def test_local_provider_maps_missing_dependency_to_stable_error():
     provider = LocalWhisperProvider(model_name="small", device="cpu", loader=lambda **_: None)
     with pytest.raises(ProviderError, match="LOCAL_MODEL_UNAVAILABLE"):
         provider.start(SessionConfig("local", "small", "en", 16000))
+
+
+def test_local_provider_disables_fp16_on_mps_to_avoid_nan_logits(monkeypatch):
+    captured = {}
+
+    class FakeModel:
+        def transcribe(self, _audio, **kwargs):
+            captured.update(kwargs)
+            return {"segments": []}
+
+    fake_whisper = SimpleNamespace(
+        load_model=lambda _name, device: FakeModel(),
+    )
+    monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
+    from backend.providers.local_whisper import LocalWhisperProvider
+
+    provider = LocalWhisperProvider(model_name="small", device="mps")
+    provider.start(SessionConfig("local", "small", "en", 16000))
+    provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert captured["fp16"] is False
+
+
+def test_distil_english_model_uses_faster_whisper_on_mps(monkeypatch):
+    captured = {}
+
+    class FakeModel:
+        def transcribe(self, _audio, **_kwargs):
+            return [], None
+
+    class FakeWhisperModule:
+        def __init__(self, model_name, device, compute_type):
+            captured.update({"model_name": model_name, "device": device, "compute_type": compute_type})
+
+        def transcribe(self, _audio, **_kwargs):
+            return [], None
+
+    fake_module = SimpleNamespace(WhisperModel=FakeWhisperModule)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    from backend.providers.local_whisper import LocalWhisperProvider
+
+    provider = LocalWhisperProvider(model_name="distil-small.en", device="mps")
+    provider.start(SessionConfig("local", "distil-small.en", "en", 16000))
+
+    assert captured == {"model_name": "distil-small.en", "device": "cpu", "compute_type": "int8"}
 
 
 def test_cloud_provider_posts_audio_without_logging_secret(monkeypatch):

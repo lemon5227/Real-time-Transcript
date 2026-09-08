@@ -87,7 +87,7 @@ class SessionManager:
 
     def push_audio(
         self, sid: str, encoded_audio: str, sample_rate: int, sequence: int
-    ) -> None:
+    ) -> bool:
         with self._lock:
             state = self._sessions.get(sid)
             if state is None:
@@ -102,11 +102,20 @@ class SessionManager:
             max_bytes=self._max_payload_bytes,
         )
         if audio.size == 0:
-            return
+            return False
         try:
             state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
-        except queue.Full as exc:
-            raise ValueError("AUDIO_QUEUE_FULL: audio frame was dropped") from exc
+            return False
+        except queue.Full:
+            # Keep the newest audio close to real time when inference is slower
+            # than capture. Dropping the oldest pending window is recoverable;
+            # turning it into a session-fatal error is not.
+            try:
+                state.audio_queue.get_nowait()
+            except queue.Empty:
+                pass
+            state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
+            return True
 
     def stop(self, sid: str) -> Dict[str, object]:
         with self._lock:

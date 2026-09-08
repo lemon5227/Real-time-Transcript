@@ -43,6 +43,15 @@ class LocalWhisperProvider:
                     compute_type=self._compute_type(),
                 )
                 self._backend = "fake" if self._model is not None else None
+            elif self.model == "distil-small.en":
+                from faster_whisper import WhisperModel
+
+                self._model = WhisperModel(
+                    self.model,
+                    device="cpu",
+                    compute_type="int8",
+                )
+                self._backend = "faster-whisper"
             elif self.device == "mps":
                 import whisper
 
@@ -109,7 +118,9 @@ class LocalWhisperProvider:
                 result = self._model.transcribe(
                     audio,
                     language=self._config.language,
-                    fp16=self.device in {"cuda", "mps"},
+                    # MPS float16 can produce NaN logits on Apple Silicon for
+                    # some Whisper checkpoints; CUDA is the only safe fp16 path.
+                    fp16=self.device == "cuda",
                 )
                 raw_segments = result.get("segments", [])
         except Exception as exc:

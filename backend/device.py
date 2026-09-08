@@ -55,7 +55,7 @@ def recommend_local_model(profile: DeviceProfile) -> str:
             return "small"
         return "base"
     if profile.device == "mps":
-        return "medium"
+        return "distil-small.en"
     if profile.memory_gb is not None and profile.memory_gb <= 4:
         return "tiny"
     if profile.performance == "limited":

@@ -56,6 +56,7 @@
     translationProvider: "google",
     translationTarget: "zh",
     translationModelMode: "auto",
+    backpressureTimer: null,
     stopResult: null,
     finalizing: false,
     micTestStream: null,
@@ -990,6 +991,14 @@
     state.socket.on("transcript_segment", addSegment);
     state.socket.on("translation_result", applyTranslationResult);
     state.socket.on("translation_error", function (error) { setTranslationStatus("翻译失败 · 原文仍然可用", true); });
+    state.socket.on("audio_backpressure", function (notice) {
+      if (!state.recording) return;
+      window.clearTimeout(state.backpressureTimer);
+      $("#feed-hint").textContent = notice && notice.message ? notice.message : "本地处理较慢，已跳过少量音频，仍在继续转录";
+      state.backpressureTimer = window.setTimeout(function () {
+        if (state.recording) $("#feed-hint").textContent = "建议戴耳机，开启清晰输入";
+      }, 5000);
+    });
     state.socket.on("transcription_error", function (error) { showError(error.message || "转录出现问题", error.action, "", error.code); });
     state.socket.on("transcription_stopped", function (result) { if (state.recording || state.finishing) receiveStopResult(result); });
   }

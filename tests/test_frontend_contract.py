@@ -26,6 +26,7 @@ def test_live_page_exposes_class_readiness_controls():
     html = app.test_client().get("/").get_data(as_text=True)
     for hook in ["readiness-panel", "model-download-button", "microphone-select", "mic-level"]:
         assert hook in html
+    assert "distil-small.en" in html
     javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
     assert "/api/models" in javascript
     assert "enumerateDevices" in javascript
@@ -72,6 +73,8 @@ def test_live_page_exposes_translation_controls_and_queue():
     for hook in ["EchoTranslationQueue", "translation_result", "实时翻译", "翻译失败"]:
         assert hook in javascript
     assert "local_model" in app.test_client().get("/api/capabilities").get_data(as_text=True)
+    assert "audio_backpressure" in javascript
+    assert "本地处理较慢" in javascript
     assert "batchSize" in queue
 
 

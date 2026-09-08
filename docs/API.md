@@ -31,7 +31,7 @@ Returns non-sensitive configuration. It never includes transcription or translat
 
 ### `GET /api/models`
 
-Returns the local model catalog, dependency availability and weight-cache readiness. This endpoint never loads a model.
+Returns the local model catalog, dependency availability and weight-cache readiness. This endpoint never loads a model. The catalog includes `distil-small.en` for English lectures on thin laptops; `tiny`, `base` and `small` remain the multilingual choices.
 
 ```json
 {"models":[{"id":"small","label":"Small","size":"~465MB","best_for":"课堂均衡","available":true,"dependency_available":true,"weights_available":true,"status":"ready","downloaded_bytes":483617219,"total_bytes":0,"progress":100,"message":"模型已下载，可以开始听课"}]}

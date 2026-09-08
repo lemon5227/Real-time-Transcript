@@ -12,7 +12,7 @@ cp .env.example .env
 ./start.sh --mode auto
 ```
 
-本地模型另装 `pip install -r requirements-local.txt`；轻薄本或内存不足时装 `requirements-cloud.txt` 并配置云端变量。首次进入课堂页后，可在“上课前检查”中查看模型缓存、下载 Tiny/Small 并测试麦克风。完整说明请看主 [README](README.md) 与 [QUICKSTART](QUICKSTART.md)。
+本地模型另装 `pip install -r requirements-local.txt`；轻薄本或内存不足时装 `requirements-cloud.txt` 并配置云端变量。英语课堂在 Mac/MPS 上推荐 `Distil Small EN`，其他语言使用多语言 `Base` 或 `Small`。首次进入课堂页后，可在“上课前检查”中查看模型状态并测试麦克风。完整说明请看主 [README](README.md) 与 [QUICKSTART](QUICKSTART.md)。
 
 课堂页：`http://127.0.0.1:5001/` · 复习页：`http://127.0.0.1:5001/review`
 

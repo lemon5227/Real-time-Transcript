@@ -10,6 +10,7 @@ from .providers.base import ProviderError
 from .providers.local_whisper import local_model_available
 
 LOCAL_MODELS = (
+    {"id": "distil-small.en", "label": "Distil Small EN", "size": "~336MB", "best_for": "英语课堂 · 轻薄本"},
     {"id": "tiny", "label": "Tiny", "size": "~75MB", "best_for": "低配 CPU"},
     {"id": "base", "label": "Base", "size": "~145MB", "best_for": "普通 CPU"},
     {"id": "small", "label": "Small", "size": "~465MB", "best_for": "课堂均衡"},
@@ -219,7 +220,7 @@ def register_socket_handlers(socketio: SocketIO) -> None:
         manager = current_app.extensions["session_manager"]
         payload = dict(data or {})
         try:
-            manager.push_audio(
+            dropped = manager.push_audio(
                 flask_request.sid,
                 encoded_audio=str(payload.get("audio") or ""),
                 sample_rate=int(payload.get("sample_rate") or 16000),
@@ -229,7 +230,16 @@ def register_socket_handlers(socketio: SocketIO) -> None:
             result = error_result(exc)
             socketio.emit("transcription_error", result["error"], to=flask_request.sid)
             return result
-        return {"status": "accepted"}
+        if dropped:
+            socketio.emit(
+                "audio_backpressure",
+                {
+                    "code": "AUDIO_BACKPRESSURE",
+                    "message": "本地处理较慢，已跳过少量音频，仍在继续转录",
+                },
+                to=flask_request.sid,
+            )
+        return {"status": "accepted", "dropped": dropped}
 
     @socketio.on("stop_transcription")
     def handle_stop(_data: Optional[Mapping[str, Any]] = None):

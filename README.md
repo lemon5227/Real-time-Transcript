@@ -44,6 +44,8 @@ For development and tests:
 pip install -r requirements-dev.txt
 ```
 
+For English lectures on a Mac/MPS laptop, choose `Distil Small EN` in the classroom page. It is a lightweight faster-whisper model; choose multilingual `Base` or `Small` when the lecture language is not English. The model is downloaded by the local runtime on first use.
+
 ## Choose a runtime
 
 | Runtime | When to choose it | Audio leaves the computer? |
