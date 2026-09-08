@@ -41,10 +41,32 @@ const memoryBackend = {
   await repository.appendChunk({sessionId: 'session-1', sequence: 1, blob: new Blob(['B']), startMs: 10000, endMs: 20000});
   await repository.appendChunk({sessionId: 'session-1', sequence: 0, blob: new Blob(['A']), startMs: 0, endMs: 10000});
   await repository.appendChunk({sessionId: 'session-1', sequence: 0, blob: new Blob(['A-duplicate']), startMs: 0, endMs: 10000});
-  const manifest = await repository.finalizeRecording({sessionId: 'session-1', durationMs: 20000});
+const manifest = await repository.finalizeRecording({sessionId: 'session-1', durationMs: 20000});
   const playable = await repository.getPlayableBlob('session-1');
   if (manifest.status !== 'ready' || manifest.chunkCount !== 2 || manifest.bytes !== 2) process.exit(1);
   if (await playable.text() !== 'AB') process.exit(2);
+})();
+'''
+    result = run_node(script)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_audio_repository_preserves_partial_failure_status():
+    script = r'''
+const { createAudioRepository } = require('./static/audio-storage.js');
+const manifests = new Map();
+const memoryBackend = {
+  createManifest: async manifest => { manifests.set(manifest.sessionId, {...manifest}); return manifests.get(manifest.sessionId); },
+  getManifest: async sessionId => manifests.get(sessionId) || null,
+  putChunk: async () => {},
+  listChunks: async () => [],
+  delete: async () => {}
+};
+(async () => {
+  const repository = createAudioRepository({backend: memoryBackend});
+  await repository.createRecording({sessionId: 'partial', mimeType: 'audio/webm', extension: 'webm'});
+  const manifest = await repository.finalizeRecording({sessionId: 'partial', durationMs: 5000, status: 'partial', error: 'disk full'});
+  if (manifest.status !== 'partial' || manifest.error !== 'disk full' || manifest.durationMs !== 5000) process.exit(1);
 })();
 '''
     result = run_node(script)

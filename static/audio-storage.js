@@ -186,10 +186,10 @@
         return store.getManifest(record.sessionId).then(function (manifest) {
           if (!manifest) throw error("课堂录音不存在", "AUDIO_SESSION_REQUIRED");
           var updated = normalizeManifest(manifest);
-          updated.status = "ready";
+          updated.status = ["ready", "partial", "failed"].indexOf(record.status) !== -1 ? record.status : "ready";
           updated.durationMs = Math.max(0, Number(record.durationMs) || updated.durationMs);
           updated.completedAt = new Date().toISOString();
-          updated.error = "";
+          updated.error = String(record.error || (updated.status === "ready" ? "" : updated.error || "原声保存未完整完成"));
           return store.createManifest(updated);
         });
       });
