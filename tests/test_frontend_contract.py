@@ -89,6 +89,19 @@ def test_translation_queue_is_loaded_by_live_page():
     assert "/static/translation-queue.js" in html
 
 
+def test_review_page_exposes_after_class_translation_and_export_modes():
+    app = create_app({})
+    html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    export = app.test_client().get("/static/export.js").get_data(as_text=True)
+    for hook in ["translate-session", "translate-selected", "翻译整节课", "review-translation-status", "export-translation-mode"]:
+        assert hook in html
+    for hook in ["/api/translate", "translationBusy", "translate-segment", "翻译失败"]:
+        assert hook in javascript
+    for hook in ["translationMode", "bilingual", "translated"]:
+        assert hook in export
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript

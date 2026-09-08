@@ -18,13 +18,14 @@
         <div class="topbar-actions"><span class="privacy-badge"><span class="privacy-lock">⌁</span>本地保存</span><a class="icon-button back-button" href="/" aria-label="返回实时听课" title="返回实时听课">←</a></div>
       </header>
 
-      <main class="review-workspace">
+      <a class="skip-link" href="#main-content">跳到主要内容</a>
+      <main class="review-workspace" id="main-content">
         <section class="review-intro"><p class="eyebrow"><span class="eyebrow-line"></span>AFTER CLASS / 课后复习</p><h1>把听过的课，<br><em>变成自己的话。</em></h1><p class="intro-copy">在这里回到课堂，找出没听清的句子，<br>标记值得重看的地方，再慢慢补上你的理解。</p></section>
 
         <section class="review-layout" aria-label="课堂笔记库">
           <aside class="library-panel">
             <div class="library-heading"><div><p class="eyebrow">YOUR LIBRARY</p><h2>课堂笔记</h2></div><span id="session-count" class="count-badge">0</span></div>
-            <label class="search-wrap" for="searchInput"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索课程、字幕或笔记" autocomplete="off"><kbd>/</kbd></label>
+            <label class="search-wrap" for="searchInput"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" aria-label="搜索课堂笔记" placeholder="搜索课程、字幕或笔记" autocomplete="off"><kbd>/</kbd></label>
             <div class="filter-tabs" role="group" aria-label="筛选课堂笔记"><button class="filter-tab is-selected" type="button" data-filter="all">全部</button><button class="filter-tab" type="button" data-filter="starred">已标记</button><button class="filter-tab" type="button" data-filter="notes">有笔记</button></div>
             <div id="sessionList" class="session-list" aria-live="polite"><div class="list-empty"><span>◌</span><p>还没有课堂笔记</p><small>完成一次听课后，它们会出现在这里。</small></div></div>
           </aside>
@@ -34,7 +35,23 @@
             <div id="detailEmpty" class="detail-empty"><div class="empty-orbit small-orbit" aria-hidden="true"><span></span><span></span><span></span><b>↗</b></div><p class="eyebrow">A QUIET PLACE TO RETURN</p><h2>选择一节课<br>开始复习。</h2><p>左边是你的课堂记录。每一段字幕都可以编辑、标记和补充笔记。</p><a href="/" class="solid-link">开始一节新课 <span>↗</span></a></div>
             <div id="detailContent" hidden>
               <div class="detail-heading"><div><span class="detail-kicker">LECTURE NOTE / 课堂记录</span><input id="review-title" class="review-title-input" type="text" maxlength="80" aria-label="课堂标题"><div id="review-meta" class="review-meta"></div></div><button id="delete-session" class="delete-button" type="button">删除记录</button></div>
-              <div class="detail-toolbar"><div class="detail-summary"><strong id="review-segment-count">0</strong><span>段字幕</span><span class="toolbar-divider"></span><span id="review-duration">00:00</span><span>课堂时长</span></div><div class="export-actions" aria-label="导出课堂笔记"><button type="button" class="export-button" data-format="txt">TXT</button><button type="button" class="export-button" data-format="md">MD</button><button type="button" class="export-button" data-format="vtt">VTT</button><button type="button" class="export-button" data-format="srt">SRT</button></div></div>
+              <div class="detail-toolbar"><div class="detail-summary"><strong id="review-segment-count">0</strong><span>段字幕</span><span class="toolbar-divider"></span><span id="review-duration">00:00</span><span>课堂时长</span></div><div class="export-actions" aria-label="导出课堂笔记"><select id="export-translation-mode" class="export-mode-select" aria-label="导出翻译内容"><option value="original">仅原文</option><option value="bilingual">原文 + 译文</option><option value="translated">仅译文</option></select><button type="button" class="export-button" data-format="txt">TXT</button><button type="button" class="export-button" data-format="md">MD</button><button type="button" class="export-button" data-format="vtt">VTT</button><button type="button" class="export-button" data-format="srt">SRT</button></div></div>
+              <section class="review-audio" aria-labelledby="review-audio-title">
+                <div class="review-audio-heading"><div><span class="detail-kicker">ORIGINAL AUDIO / 原声</span><h3 id="review-audio-title">回听这节课</h3></div><span id="reviewAudioStatus" class="audio-status">读取中…</span></div>
+                <audio id="reviewAudio" controls preload="metadata" aria-label="课堂原声"></audio>
+                <div class="review-audio-meta"><span id="reviewAudioMeta">音频信息读取中…</span><button id="export-audio" class="export-button" type="button" disabled>导出原声</button></div>
+              </section>
+              <section class="review-translation" aria-labelledby="review-translation-title">
+                <div class="review-translation-heading"><div><span class="detail-kicker">TRANSLATE / 翻译</span><h3 id="review-translation-title">把没听懂的地方变成自己的话</h3></div><span id="review-translation-status" class="translation-status">选择翻译方式</span></div>
+                <div class="review-translation-controls">
+                  <label class="review-select-label" for="review-translation-mode">方式<select id="review-translation-mode" class="text-input select-input"><option value="fast">快速翻译</option><option value="model">精确翻译 · 模型</option><option value="auto">自动 · 本地优先</option></select></label>
+                  <label class="review-select-label" for="review-translation-provider">服务<select id="review-translation-provider" class="text-input select-input"><option value="google">Google Cloud</option><option value="microsoft">Microsoft Translator</option></select></label>
+                  <label class="review-select-label" for="review-translation-model">模型方式<select id="review-translation-model" class="text-input select-input"><option value="auto">自动</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select></label>
+                  <label class="review-select-label" for="review-translation-target">目标<select id="review-translation-target" class="text-input select-input"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></label>
+                </div>
+                <div class="review-translation-actions"><button id="translate-session" class="translation-action primary" type="button">翻译整节课</button><button id="translate-selected" class="translation-action" type="button">翻译选中段落</button><button id="translate-failed" class="translation-action" type="button">重试失败段落</button></div>
+                <p id="review-translation-progress" class="review-translation-progress">译文会保存在本机课堂笔记中；原声不会发送给翻译服务。</p>
+              </section>
               <div id="reviewStream" class="review-stream" data-note-input="noteInput"></div>
             </div>
           </section>
@@ -42,6 +59,7 @@
       </main>
     </div>
     <script src="{{ url_for('static', filename='storage.js') }}"></script>
+    <script src="{{ url_for('static', filename='audio-storage.js') }}"></script>
     <script src="{{ url_for('static', filename='export.js') }}"></script>
     <script src="{{ url_for('static', filename='review.js') }}"></script>
   </body>

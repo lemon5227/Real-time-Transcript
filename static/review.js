@@ -3,10 +3,11 @@
 
   var $ = function (selector) { return document.querySelector(selector); };
   var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var state = { sessions: [], selected: null, filter: "all", query: "" };
+  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioManifest: null, audioLoadToken: 0, translationBusy: false, translationRun: 0 };
   var list = $("#sessionList");
   var detailEmpty = $("#detailEmpty");
   var detailContent = $("#detailContent");
+  var reviewAudio = $("#reviewAudio");
 
   function showNotice(kind, message, action) {
     var notice = $("#reviewNotice");
@@ -28,6 +29,218 @@
   }
 
   function segmentsOf(session) { return (session && session.segments) || []; }
+
+  function translationOf(segment, target) {
+    var record = segment && segment.translations && segment.translations[target || $("#review-translation-target").value];
+    return record || null;
+  }
+
+  function reviewTranslationSettings() {
+    var mode = $("#review-translation-mode").value;
+    return {
+      mode: mode,
+      provider: mode === "fast" ? $("#review-translation-provider").value : $("#review-translation-model").value,
+      target: $("#review-translation-target").value
+    };
+  }
+
+  function setReviewTranslationStatus(message, warning) {
+    var node = $("#review-translation-status");
+    node.textContent = message;
+    node.classList.toggle("is-warning", Boolean(warning));
+  }
+
+  function updateTranslationControls() {
+    var settings = reviewTranslationSettings();
+    $("#review-translation-provider").disabled = settings.mode !== "fast" || state.translationBusy;
+    $("#review-translation-model").disabled = settings.mode === "fast" || state.translationBusy;
+    ["#translate-session", "#translate-selected", "#translate-failed"].forEach(function (selector) { $(selector).disabled = state.translationBusy || !state.selected; });
+    $("#review-translation-progress").textContent = state.translationBusy ? "正在按批次翻译，已完成的段落会立即保存…" : "译文会保存在本机课堂笔记中；原声不会发送给翻译服务。";
+  }
+
+  function findReviewSegment(id) {
+    return segmentsOf(state.selected).find(function (segment) { return String(segment.id || "") === String(id); }) || null;
+  }
+
+  function renderReviewTranslation(card, segment) {
+    var oldLine = card.querySelector(".review-translation-line");
+    if (oldLine) oldLine.remove();
+    var settings = reviewTranslationSettings();
+    var translation = translationOf(segment, settings.target);
+    if (!translation || translation.status !== "ready" || !translation.text) return;
+    var line = document.createElement("p");
+    line.className = "review-translation-line";
+    line.textContent = translation.text;
+    var editor = card.querySelector(".segment-editor");
+    if (editor && editor.nextSibling) card.insertBefore(line, editor.nextSibling);
+    else card.appendChild(line);
+  }
+
+  function applyReviewTranslation(result) {
+    var settings = reviewTranslationSettings();
+    (result && result.translations || []).forEach(function (item) {
+      var segment = findReviewSegment(item.segment_id || item.id);
+      if (!segment) return;
+      segment.translations = segment.translations || {};
+      segment.translations[item.target_language || settings.target] = item;
+      $$(".review-segment").forEach(function (card) {
+        if (card.dataset.segmentId === String(item.segment_id || item.id)) renderReviewTranslation(card, segment);
+      });
+    });
+  }
+
+  function persistTranslationState() {
+    if (!state.selected || !window.EchoStore) return Promise.resolve();
+    return window.EchoStore.saveSession(state.selected).then(function () { renderLibrary(); }).catch(function () { showNotice("error", "译文已显示，但本地缓存失败", "请检查浏览器存储权限"); });
+  }
+
+  function translateSegments(candidates, options) {
+    if (state.translationBusy || !state.selected) return Promise.resolve();
+    var settings = reviewTranslationSettings();
+    var force = Boolean(options && options.force);
+    var target = settings.target;
+    var pending = (candidates || []).filter(function (segment) {
+      var translation = translationOf(segment, target);
+      return force || !translation || translation.status !== "ready";
+    });
+    if (!pending.length) {
+      setReviewTranslationStatus("已有译文缓存", false);
+      $("#review-translation-progress").textContent = "所选段落已有译文，没有重复请求。";
+      return Promise.resolve();
+    }
+    state.translationBusy = true;
+    var run = state.translationRun + 1;
+    state.translationRun = run;
+    updateTranslationControls();
+    setReviewTranslationStatus(settings.mode === "fast" ? "快速翻译中" : "模型翻译中", false);
+    var total = pending.length;
+    var completed = 0;
+    var batches = [];
+    for (var index = 0; index < pending.length; index += 20) batches.push(pending.slice(index, index + 20));
+    return batches.reduce(function (chain, batch) {
+      return chain.then(function () {
+        if (run !== state.translationRun) return null;
+        return fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: state.selected.id,
+            segments: batch.map(function (segment) { return { id: segment.id, text: segment.text }; }),
+            source_language: state.selected.language || "en",
+            target_language: target,
+            mode: settings.mode,
+            provider: settings.provider
+          })
+        }).then(function (response) {
+          return response.json().then(function (body) { if (!response.ok || body.status === "error") { var failure = new Error(body.error && body.error.message || "翻译失败"); failure.code = body.error && body.error.code; throw failure; } return body; });
+        }).then(function (result) {
+          applyReviewTranslation(result);
+          completed += batch.length;
+          $("#review-translation-progress").textContent = "已完成 " + completed + " / " + total + " 段 · 结果正在保存";
+          return persistTranslationState();
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      setReviewTranslationStatus("译文已保存", false);
+      showNotice("success", "课后翻译已完成", "结果已保存在本机");
+    }).catch(function (error) {
+      setReviewTranslationStatus("翻译失败", true);
+      $("#review-translation-progress").textContent = (error.message || "翻译失败") + " · 已完成的段落仍然保留，可重试";
+      showNotice("error", "部分翻译未完成", "已完成的结果不会丢失");
+    }).finally(function () {
+      if (run === state.translationRun) { state.translationBusy = false; updateTranslationControls(); }
+    });
+  }
+
+  function selectedReviewSegments() {
+    var ids = $$(".segment-select:checked").map(function (input) { return input.value; });
+    return segmentsOf(state.selected).filter(function (segment) { return ids.indexOf(String(segment.id || "")) !== -1; });
+  }
+
+  function failedReviewSegments() {
+    var target = $("#review-translation-target").value;
+    return segmentsOf(state.selected).filter(function (segment) { var translation = translationOf(segment, target); return translation && translation.status === "failed"; });
+  }
+
+  function formatBytes(bytes) {
+    var value = Math.max(0, Number(bytes) || 0);
+    if (value < 1024 * 1024) return Math.max(1, Math.round(value / 1024)) + "KB";
+    return (value / (1024 * 1024)).toFixed(1) + "MB";
+  }
+
+  function releaseAudioUrl() {
+    if (state.audioUrl) window.URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = null;
+    state.audioManifest = null;
+    reviewAudio.removeAttribute("src");
+    reviewAudio.load();
+    $("#export-audio").disabled = true;
+  }
+
+  function setAudioStatus(status, meta) {
+    $("#reviewAudioStatus").textContent = status;
+    $("#reviewAudioMeta").textContent = meta;
+  }
+
+  function loadAudio(session) {
+    var token = state.audioLoadToken + 1;
+    state.audioLoadToken = token;
+    releaseAudioUrl();
+    if (!session || !window.EchoAudioRepository) {
+      setAudioStatus("没有保存原声", "这节课堂只有字幕记录");
+      return Promise.resolve(null);
+    }
+    setAudioStatus("正在读取原声", "正在从本机存储恢复音频…");
+    return window.EchoAudioRepository.getManifest(session.id).then(function (manifest) {
+      if (token !== state.audioLoadToken || !manifest || !manifest.chunkCount) {
+        if (token === state.audioLoadToken) setAudioStatus("没有保存原声", "这节课堂只有字幕记录");
+        return null;
+      }
+      state.audioManifest = manifest;
+      return window.EchoAudioRepository.getPlayableBlob(session.id).then(function (blob) {
+        if (token !== state.audioLoadToken) return null;
+        if (!blob) {
+          setAudioStatus("原声暂不可用", "本机没有找到可播放的音频片段");
+          return null;
+        }
+        state.audioUrl = window.URL.createObjectURL(blob);
+        reviewAudio.src = state.audioUrl;
+        reviewAudio.load();
+        $("#export-audio").disabled = false;
+        setAudioStatus(manifest.status === "ready" ? "原声已保存" : "原声部分保存", formatBytes(manifest.bytes) + " · " + formatDuration(manifest.durationMs));
+        return blob;
+      });
+    }).catch(function () {
+      if (token === state.audioLoadToken) setAudioStatus("原声读取失败", "字幕仍然可以继续复习");
+      return null;
+    });
+  }
+
+  function seekToSegment(segment) {
+    if (!state.audioUrl || !segment) return;
+    reviewAudio.currentTime = Math.max(0, Number(segment.startMs) || 0) / 1000;
+    reviewAudio.play().catch(function () {});
+  }
+
+  function syncPlayingSegment() {
+    var currentMs = (Number(reviewAudio.currentTime) || 0) * 1000;
+    var segments = segmentsOf(state.selected);
+    $$(".review-segment").forEach(function (card, index) {
+      var segment = segments[index];
+      var next = segments[index + 1];
+      var endMs = Number(segment && segment.endMs) || (next ? Number(next.startMs) || currentMs : Number.POSITIVE_INFINITY);
+      card.classList.toggle("is-playing", Boolean(segment && Number(segment.startMs) <= currentMs && currentMs < endMs));
+    });
+  }
+
+  function downloadAudio() {
+    if (!state.audioUrl || !state.selected || !state.audioManifest) return showNotice("info", "这节课堂没有可导出的原声");
+    var link = document.createElement("a");
+    link.href = state.audioUrl;
+    link.download = (state.selected.title || "lecture").replace(/[\\/:*?"<>|]+/g, "-") + "." + (state.audioManifest.extension || "webm");
+    link.click();
+    showNotice("success", "已准备导出原声", (state.audioManifest.extension || "webm").toUpperCase());
+  }
 
   function matchesSession(session) {
     var query = state.query.trim().toLowerCase();
@@ -83,32 +296,38 @@
   }
 
   function renderDetail() {
-    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; return; }
+    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; updateTranslationControls(); return; }
     detailEmpty.hidden = true;
     detailContent.hidden = false;
     $("#review-title").value = state.selected.title || "未命名课堂";
     $("#review-meta").textContent = formatDate(state.selected.createdAt) + "  ·  " + (state.selected.provider || "unknown") + (state.selected.model ? " / " + state.selected.model : "") + "  ·  " + (state.selected.language || "en");
     $("#review-segment-count").textContent = segmentsOf(state.selected).length;
     $("#review-duration").textContent = formatDuration(state.selected.durationMs);
+    loadAudio(state.selected);
     var stream = $("#reviewStream"); stream.textContent = "";
     segmentsOf(state.selected).forEach(function (segment, index) {
-      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : "");
+      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : ""); card.dataset.segmentIndex = String(index);
       var header = document.createElement("div"); header.className = "review-segment-header";
-      var time = document.createElement("time"); time.textContent = window.EchoExport.timestamp(segment.startMs, ".");
+      var time = document.createElement("time"); time.textContent = window.EchoExport.timestamp(segment.startMs, "."); time.tabIndex = 0; time.setAttribute("role", "button"); time.setAttribute("aria-label", "跳转到第 " + (index + 1) + " 段字幕"); time.addEventListener("click", function () { seekToSegment(segment); }); time.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); seekToSegment(segment); } });
+      var selectLabel = document.createElement("label"); selectLabel.className = "segment-select-label"; var selectInput = document.createElement("input"); selectInput.type = "checkbox"; selectInput.className = "segment-select"; selectInput.value = String(segment.id || ""); selectInput.setAttribute("aria-label", "选择第 " + (index + 1) + " 段字幕"); var selectText = document.createElement("span"); selectText.textContent = "选择"; selectLabel.append(selectInput, selectText);
       var starButton = document.createElement("button"); starButton.type = "button"; starButton.className = "star-toggle"; starButton.dataset.starred = String(Boolean(segment.starred)); starButton.setAttribute("aria-label", segment.starred ? "取消重点标记" : "标记为重点"); starButton.textContent = segment.starred ? "★ 重点" : "☆ 标记重点";
       starButton.addEventListener("click", function () { segment.starred = !segment.starred; renderDetail(); saveSelected(); });
-      header.append(time, starButton);
+      var translateButton = document.createElement("button"); translateButton.type = "button"; translateButton.className = "translate-segment"; translateButton.textContent = "译本句"; translateButton.addEventListener("click", function () { translateSegments([segment], { force: true }); });
+      header.append(time, selectLabel, translateButton, starButton);
       var editor = document.createElement("textarea"); editor.className = "segment-editor"; editor.rows = 2; editor.value = segment.text || ""; editor.setAttribute("aria-label", "编辑第 " + (index + 1) + " 段字幕");
       editor.addEventListener("input", function () { segment.text = editor.value; window.clearTimeout(editor._saveTimer); editor._saveTimer = window.setTimeout(function () { saveSelected("已保存修改"); }, 500); });
+      card.append(header, editor);
+      renderReviewTranslation(card, segment);
       var noteRow = document.createElement("label"); noteRow.className = "note-row"; var noteLabel = document.createElement("span"); noteLabel.textContent = "NOTE"; var noteInput = document.createElement("textarea"); noteInput.id = index === 0 ? "noteInput" : "noteInput-" + index; noteInput.rows = 1; noteInput.placeholder = "补充你的理解、例子或待查概念…"; noteInput.value = segment.note || ""; noteInput.setAttribute("aria-label", "为第 " + (index + 1) + " 段字幕添加笔记"); noteInput.addEventListener("input", function () { segment.note = noteInput.value; window.clearTimeout(noteInput._saveTimer); noteInput._saveTimer = window.setTimeout(function () { saveSelected("已保存笔记"); }, 500); }); noteRow.append(noteLabel, noteInput);
-      card.append(header, editor, noteRow); stream.appendChild(card);
+      card.append(noteRow); stream.appendChild(card);
     });
+    updateTranslationControls();
   }
 
   function download(format) {
     if (!state.selected) return showNotice("info", "请先选择一节课堂");
     var formatters = { txt: window.EchoExport.formatPlainText, md: window.EchoExport.formatMarkdown, vtt: window.EchoExport.formatVtt, srt: window.EchoExport.formatSrt };
-    var content = formatters[format](state.selected);
+    var content = formatters[format](state.selected, { translationMode: $("#export-translation-mode").value, targetLanguage: $("#review-translation-target").value });
     var mime = format === "md" ? "text/markdown;charset=utf-8" : format === "vtt" || format === "srt" ? "text/plain;charset=utf-8" : "text/plain;charset=utf-8";
     var link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: mime })); link.download = (state.selected.title || "lecture").replace(/[\\/:*?"<>|]+/g, "-") + "." + format; link.click(); window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
     showNotice("success", "已准备导出文件", format.toUpperCase());
@@ -121,8 +340,15 @@
   $("#searchInput").addEventListener("input", function (event) { state.query = event.target.value; renderLibrary(); });
   $$(".filter-tab").forEach(function (button) { button.addEventListener("click", function () { state.filter = button.dataset.filter; $$(".filter-tab").forEach(function (tab) { tab.classList.toggle("is-selected", tab === button); }); renderLibrary(); }); });
   $("#review-title").addEventListener("change", function (event) { if (state.selected) { state.selected.title = event.target.value.trim() || "未命名课堂"; saveSelected("已保存标题"); } });
-  $("#delete-session").addEventListener("click", function () { if (!state.selected || !window.confirm("确定删除这节课堂记录吗？此操作无法撤销。")) return; var id = state.selected.id; window.EchoStore.deleteSession(id).then(function () { state.sessions = state.sessions.filter(function (session) { return session.id !== id; }); state.selected = null; renderLibrary(); renderDetail(); showNotice("success", "课堂记录已删除"); }).catch(function () { showNotice("error", "删除失败", "请重试"); }); });
+  $("#delete-session").addEventListener("click", function () { if (!state.selected || !window.confirm("确定删除这节课堂记录吗？此操作无法撤销。")) return; var id = state.selected.id; var removeAudio = window.EchoAudioRepository && window.EchoAudioRepository.deleteRecording ? window.EchoAudioRepository.deleteRecording(id) : Promise.resolve(); removeAudio.then(function () { return window.EchoStore.deleteSession(id); }).then(function () { state.sessions = state.sessions.filter(function (session) { return session.id !== id; }); state.selected = null; releaseAudioUrl(); renderLibrary(); renderDetail(); showNotice("success", "课堂记录已删除"); }).catch(function () { showNotice("error", "删除失败", "课堂记录和原声都未删除"); }); });
   $$(".export-button").forEach(function (button) { button.addEventListener("click", function () { download(button.dataset.format); }); });
+  $("#export-audio").addEventListener("click", downloadAudio);
+  $("#translate-session").addEventListener("click", function () { translateSegments(segmentsOf(state.selected)); });
+  $("#translate-selected").addEventListener("click", function () { var segments = selectedReviewSegments(); if (!segments.length) return showNotice("info", "请先勾选要翻译的段落"); translateSegments(segments); });
+  $("#translate-failed").addEventListener("click", function () { var segments = failedReviewSegments(); if (!segments.length) return showNotice("info", "当前没有失败的译文"); translateSegments(segments, { force: true }); });
+  ["#review-translation-mode", "#review-translation-provider", "#review-translation-model", "#review-translation-target"].forEach(function (selector) { $(selector).addEventListener("change", function () { updateTranslationControls(); renderDetail(); }); });
+  reviewAudio.addEventListener("timeupdate", syncPlayingSegment);
+  window.addEventListener("beforeunload", releaseAudioUrl);
   document.addEventListener("keydown", function (event) { if (event.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") { event.preventDefault(); $("#searchInput").focus(); } });
   loadLibrary();
 }());
