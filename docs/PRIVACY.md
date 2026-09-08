@@ -8,13 +8,13 @@ The live page saves original audio locally by default in browser storage, in dur
 
 ## Local mode
 
-Local mode runs the selected Whisper-compatible model on the configured computer. Audio is decoded, resampled and processed in memory by the local process. It is not sent to a third-party transcription service by this project.
+Local mode runs the selected model on the configured computer. Apple Silicon uses the MLX Parakeet runtime; Windows, Linux and Intel Mac use the standard Whisper runtime, with CUDA when an NVIDIA GPU is available and CPU otherwise. Audio is decoded, resampled and processed in memory by the local process. It is not sent to a third-party transcription service by this project.
 
 ## Cloud mode
 
 Cloud mode sends short normalized audio windows to the endpoint configured in the backend `.env`. The endpoint receives the audio, model name and language. Choose a provider whose retention, training and regional processing policies are acceptable for classroom recordings. The UI shows a cloud privacy notice when this path is selected.
 
-Auto mode tries local startup first. If the local model cannot load and cloud settings are complete, it falls back to the configured cloud provider. This behavior should be included in the user’s consent decision.
+Auto mode follows the device-compatible local path first. If the local model is unavailable, the language is not supported by the Mac MLX path, or local startup fails, and cloud settings are complete, it uses the configured cloud provider. This behavior should be included in the user’s consent decision.
 
 ## Translation mode
 

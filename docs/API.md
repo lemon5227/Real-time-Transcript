@@ -31,7 +31,7 @@ Returns non-sensitive configuration. It never includes transcription or translat
 
 ### `GET /api/models`
 
-Returns the local model catalog, dependency availability and weight-cache readiness. This endpoint never loads a model. The catalog includes `distil-small.en` for English lectures on thin laptops; `tiny`, `base` and `small` remain the multilingual choices.
+Returns the local model catalog, dependency availability and weight-cache readiness. This endpoint never loads a model. `parakeet-tdt-0.6b-v3` is the Apple Silicon MLX option for English and European-language lectures; the Whisper entries are the standard CPU/CUDA family.
 
 ```json
 {"models":[{"id":"small","label":"Small","size":"~465MB","best_for":"课堂均衡","available":true,"dependency_available":true,"weights_available":true,"status":"ready","downloaded_bytes":483617219,"total_bytes":0,"progress":100,"message":"模型已下载，可以开始听课"}]}
@@ -45,7 +45,7 @@ Returns device, local path, cloud configuration state, audio defaults and transl
 
 ```json
 {
-  "local":{"available":true,"ready_models":["small"],"device":{"kind":"cpu","device":"cpu","label":"CPU","recommended_model":"small"},"recommended_model":"small"},
+  "local":{"available":true,"runtime":"cuda","ready_models":["small"],"device":{"kind":"nvidia","device":"cuda","runtime":"cuda","recommended_model":"small"},"recommended_model":"small"},
   "cloud":{"configured":false,"base_url":"","model":""},
   "audio":{"sample_rate":16000,"max_queue":32,"window_seconds":3.0,"overlap_seconds":0.5},
   "translation":{"google":{"configured":false},"microsoft":{"configured":false,"region":""},"cloud_model":{"configured":false,"model":""},"timeout_seconds":20}

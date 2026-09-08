@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from backend import create_app
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_live_page_exposes_accessible_lecture_workbench():
@@ -138,3 +142,17 @@ def test_live_workbench_has_planned_control_groups_and_follow_feedback():
         assert hook in javascript
     for hook in ["follow-pulse", "return-latest-in", "prefers-reduced-motion"]:
         assert hook in stylesheet
+
+
+def test_mac_runtime_install_and_ui_contracts():
+    requirements = (ROOT / "requirements-mac.txt").read_text(encoding="utf-8")
+    assert "requirements-core.txt" in requirements
+    assert "parakeet-mlx" in requirements
+
+    app = create_app({})
+    html = app.test_client().get("/").get_data(as_text=True)
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+    assert "parakeet-tdt-0.6b-v3" in html
+    assert "Mac MLX" in html
+    for hook in ["recommended_model", "local.runtime", "model.runtime", "运行时"]:
+        assert hook in javascript or hook in html

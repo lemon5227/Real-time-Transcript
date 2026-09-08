@@ -97,7 +97,7 @@
             </div>
 
               <div class="field-grid setup-field-grid">
-              <div class="field-block"><label class="field-label" for="model-select">模型</label><select class="text-input select-input" id="model-select"><option value="distil-small.en" selected>Distil Small EN · 英语课堂</option><option value="small">Small · 均衡</option><option value="base">Base · 轻量</option><option value="tiny">Tiny · 最省资源</option><option value="medium">Medium · 更准确</option><option value="large-v3-turbo">Large v3 Turbo · 高性能</option></select></div>
+              <div class="field-block"><label class="field-label" for="model-select">模型</label><select class="text-input select-input" id="model-select"><option value="parakeet-tdt-0.6b-v3">Parakeet TDT v3 · Mac MLX · 英语课堂</option><option value="distil-small.en" selected>Distil Small EN · 英语课堂</option><option value="small">Small · 均衡</option><option value="base">Base · 轻量</option><option value="tiny">Tiny · 最省资源</option><option value="medium">Medium · 更准确</option><option value="large-v3-turbo">Large v3 Turbo · 高性能</option></select></div>
               <div class="field-block"><label class="field-label" for="language-select">讲课语言</label><select class="text-input select-input" id="language-select"><option value="en">English</option><option value="zh">中文</option><option value="auto">自动识别</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div>
               <div class="model-brief" id="model-selection-note" aria-live="polite"><div class="model-brief-head"><span class="model-profile-badge" id="model-profile-badge">英语课堂</span><span class="model-ready-chip" id="model-ready-chip">检查中</span></div><div class="model-specs" aria-label="模型选择指标"><span><small>速度</small><strong id="model-speed">—</strong></span><span><small>质量</small><strong id="model-quality">—</strong></span><span><small>占用</small><strong id="model-resource">—</strong></span></div><p id="model-selection-summary">加载模型速度、质量和设备占用…</p></div>
             </div>
@@ -114,7 +114,8 @@
 
             <div class="capability-panel" id="capability-panel" aria-live="polite">
               <div class="capability-icon" aria-hidden="true">✦</div>
-              <div><strong id="capability-title">正在读取设备能力</strong><p id="capability-note">马上告诉你哪条路径最顺畅。</p></div>
+              <div class="capability-copy"><strong id="capability-title">正在读取设备能力</strong><p id="capability-note">马上告诉你哪条路径最顺畅。</p></div>
+              <span class="runtime-badge" id="runtime-badge">检测中</span>
             </div>
 
             <section class="readiness-panel" id="readiness-panel" aria-labelledby="readiness-title" aria-live="polite" aria-busy="true">

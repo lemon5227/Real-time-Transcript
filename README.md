@@ -6,11 +6,12 @@
 
 ## What it does
 
-- Realtime microphone transcription for English, Chinese, Japanese, Korean and other Whisper-supported languages.
+- Realtime microphone transcription for English lectures and other supported languages; the active local runtime is selected by device.
 - Browser audio is normalized to mono 16 kHz; common 44.1/48 kHz microphones are accepted.
-- Local mode uses `faster-whisper` when available and keeps audio on the computer.
+- Apple Silicon Mac local mode uses the MLX Parakeet TDT v3 path for English and European-language lectures.
+- Windows, Linux and Intel Mac use the standard Whisper path; NVIDIA devices use CUDA automatically, while CPU laptops use CPU inference.
 - Cloud mode sends short audio windows to the endpoint configured by the user, which makes the app practical on thin laptops.
-- Auto mode tries local startup first and falls back to the configured cloud provider when local model loading fails.
+- Auto mode follows the device recommendation and uses the configured cloud provider when the local path is unavailable or unsuitable.
 - Post-class review stores sessions in browser IndexedDB, with search, inline edits, notes, starred segments and TXT/Markdown/VTT/SRT export.
 
 ## Install
@@ -32,6 +33,12 @@ For local mode, install the optional runtime (model weights download on first us
 pip install -r requirements-local.txt
 ```
 
+For Apple Silicon Mac local mode, install the MLX runtime instead:
+
+```bash
+pip install -r requirements-mac.txt
+```
+
 For cloud mode, install the HTTP client:
 
 ```bash
@@ -44,15 +51,17 @@ For development and tests:
 pip install -r requirements-dev.txt
 ```
 
-For English lectures on a Mac/MPS laptop, choose `Distil Small EN` in the classroom page. It is a lightweight faster-whisper model; choose multilingual `Base` or `Small` when the lecture language is not English. The model is downloaded by the local runtime on first use.
+On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. The model/runtime downloads on first use.
 
 ## Choose a runtime
 
 | Runtime | When to choose it | Audio leaves the computer? |
 | --- | --- | --- |
-| Auto | Default; local first, cloud fallback | Only if local startup fails and cloud is configured |
-| Local | Privacy, stable offline use, capable CPU/GPU | No |
-| Cloud | Thin laptop, low memory, no local model runtime | Yes, to your configured endpoint |
+| Apple Silicon + MLX | English/European lectures on Mac | No |
+| CUDA | Windows/Linux with NVIDIA GPU | No |
+| CPU | Thin laptop with local runtime; use Auto for cloud fallback | No, unless Auto falls back to cloud |
+| Cloud | Thin laptop, low memory, or Chinese on Mac | Yes, to your configured endpoint |
+| Auto | Device recommendation plus cloud fallback | Only when cloud fallback is selected |
 
 Cloud variables belong in the backend `.env` only:
 
@@ -97,7 +106,7 @@ Recommended classroom flow:
 
 ## Troubleshooting
 
-- The local model is too slow or fails to load: choose a smaller model, use `--mode cloud`, or configure cloud variables and keep `--mode auto`.
+- The local model is too slow or fails to load: on Mac use the MLX requirements, on an NVIDIA machine check CUDA, or configure cloud variables and keep `--mode auto`.
 - The browser cannot hear audio: use a secure browser context or localhost, allow the microphone, and check the selected input device.
 - Cloud requests fail: verify the base URL includes the provider API root, the key/model are valid, and the service accepts `POST /audio/transcriptions`.
 - No review records appear: allow IndexedDB/local storage for `127.0.0.1`; live transcription itself does not depend on the review database.

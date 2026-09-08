@@ -12,7 +12,7 @@ cp .env.example .env
 ./start.sh --mode auto
 ```
 
-本地模型另装 `pip install -r requirements-local.txt`；轻薄本或内存不足时装 `requirements-cloud.txt` 并配置云端变量。英语课堂在 Mac/MPS 上推荐 `Distil Small EN`，其他语言使用多语言 `Base` 或 `Small`。首次进入课堂页后，可在“上课前检查”中查看模型状态并测试麦克风。完整说明请看主 [README](README.md) 与 [QUICKSTART](QUICKSTART.md)。
+本地模型按设备分开：Apple Silicon Mac 安装 `requirements-mac.txt` 走 MLX Parakeet，Windows/Linux/Intel Mac 安装 `requirements-local.txt`；检测到 NVIDIA 独显时标准 Whisper 自动走 CUDA。轻薄 CPU 本可使用 `requirements-cloud.txt` 配置云端，自动模式会在本地不适合时使用云端。Mac 上中文课堂请直接切换云端，避免偷偷退回 CPU Whisper。首次进入课堂页后，可在“上课前检查”中查看 MLX/CUDA/CPU、模型状态并测试麦克风。完整说明请看主 [README](README.md) 与 [QUICKSTART](QUICKSTART.md)。
 
 课堂页：`http://127.0.0.1:5001/` · 复习页：`http://127.0.0.1:5001/review`
 

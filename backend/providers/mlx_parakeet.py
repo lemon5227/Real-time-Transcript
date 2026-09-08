@@ -61,6 +61,7 @@ class MlxParakeetProvider:
         self._loader = loader
         self._model = None
         self._stream = None
+        self._audio_converter = None
         self._config: Optional[SessionConfig] = None
         self._audio_samples = 0
         self._segment_number = 0
@@ -79,8 +80,10 @@ class MlxParakeetProvider:
             if self._loader is not None:
                 self._model = self._loader(model_ref=self.model)
             else:
+                import mlx.core as mx
                 from parakeet_mlx import from_pretrained
 
+                self._audio_converter = mx.array
                 self._model = from_pretrained(self.model)
             if self._model is None:
                 raise ImportError("parakeet_mlx returned no model")
@@ -106,7 +109,8 @@ class MlxParakeetProvider:
             return []
         window_start_ms = round(self._audio_samples * 1000 / 16000)
         try:
-            self._stream.add_audio(chunk)
+            runtime_audio = self._audio_converter(chunk) if self._audio_converter else chunk
+            self._stream.add_audio(runtime_audio)
             self._audio_samples += int(chunk.size)
             result = self._stream.result
         except Exception as exc:
@@ -161,7 +165,7 @@ class MlxParakeetProvider:
         full_text = str(getattr(result, "text", "") or "").strip()
         if not full_text:
             return ""
-        final_text = " ".join(
+        final_text = "".join(
             str(getattr(sentence, "text", "") or "").strip()
             for sentence in getattr(result, "sentences", None) or []
             if str(getattr(sentence, "text", "") or "").strip()

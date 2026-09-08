@@ -1,4 +1,5 @@
 from backend import create_app
+from backend.device import DeviceProfile
 
 
 def test_capabilities_redact_cloud_api_key():
@@ -55,6 +56,30 @@ def test_catalog_marks_runtime_families():
     assert by_id["parakeet-tdt-0.6b-v3"]["runtime"] == "mlx"
     assert by_id["small"]["runtime"] == "standard"
     assert by_id["parakeet-tdt-0.6b-v3"]["model_ref"] == "mlx-community/parakeet-tdt-0.6b-v3"
+
+
+def test_capabilities_only_count_models_for_active_runtime(monkeypatch):
+    from backend import routes
+
+    monkeypatch.setattr(
+        routes,
+        "get_device_profile",
+        lambda: DeviceProfile("mps", "apple", None, "balanced"),
+    )
+    app = create_app({})
+
+    class FakeModelManager:
+        def list_models(self):
+            return [
+                {"id": "parakeet-tdt-0.6b-v3", "runtime": "mlx", "dependency_available": False, "status": "dependency_missing"},
+                {"id": "small", "runtime": "standard", "dependency_available": True, "status": "ready"},
+            ]
+
+    app.extensions["model_manager"] = FakeModelManager()
+    body = app.test_client().get("/api/capabilities").get_json()
+
+    assert body["local"]["available"] is False
+    assert body["local"]["ready_models"] == []
 
 
 def test_model_download_endpoint_rejects_unknown_model():

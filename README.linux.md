@@ -10,4 +10,4 @@ cp .env.example .env
 ./start.sh --mode auto
 ```
 
-For a capable machine, add `requirements-local.txt`; for a thin laptop, add `requirements-cloud.txt` and set `CLOUD_BASE_URL`, `CLOUD_API_KEY` and `CLOUD_TRANSCRIPTION_MODEL`. The browser pages are `/` and `/review`.
+For a capable machine, add `requirements-local.txt`; an NVIDIA GPU is detected and used through CUDA automatically. For a thin CPU laptop, add `requirements-cloud.txt` and set `CLOUD_BASE_URL`, `CLOUD_API_KEY` and `CLOUD_TRANSCRIPTION_MODEL`, then use Auto or Cloud mode. The browser pages are `/` and `/review`.

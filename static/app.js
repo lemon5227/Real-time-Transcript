@@ -147,6 +147,7 @@
 
   function inferErrorAction(message, code) {
     var value = String(code || "") + " " + String(message || "");
+    if (/MLX_LANGUAGE|RUNTIME_MISMATCH/.test(value)) return "switch-cloud";
     if (/MODEL|模型|依赖/.test(value)) return "download-model";
     if (/麦克风|权限|MIC/.test(value)) return "retry-mic";
     if (/云端|CLOUD|provider/i.test(value)) return "switch-cloud";
@@ -216,6 +217,54 @@
     return state.models.find(function (model) { return model.id === modelSelect.value; }) || null;
   }
 
+  var PARAKEET_LANGUAGES = ["bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk"];
+
+  function localRuntime() {
+    return state.capabilities && state.capabilities.local ? state.capabilities.local.runtime : "";
+  }
+
+  function runtimeCopy(runtime) {
+    if (runtime === "mlx") return "MLX · Apple Silicon";
+    if (runtime === "cuda") return "CUDA · NVIDIA GPU";
+    if (runtime === "cpu") return "CPU · 可用云端兜底";
+    return "运行时检测中";
+  }
+
+  function modelRuntimeCompatible(model) {
+    if (!model || !localRuntime()) return true;
+    return localRuntime() === "mlx" ? model.runtime === "mlx" : model.runtime !== "mlx";
+  }
+
+  function modelLanguageCompatible(model) {
+    if (!model || model.runtime !== "mlx") return true;
+    var language = $("#language-select").value;
+    return language === "auto" || PARAKEET_LANGUAGES.indexOf(language) !== -1;
+  }
+
+  function localModelUsable(model) {
+    return Boolean(
+      model &&
+      modelRuntimeCompatible(model) &&
+      modelLanguageCompatible(model) &&
+      ["ready", "runtime_download"].indexOf(model.status) !== -1
+    );
+  }
+
+  function syncRuntimeModelSelection() {
+    if (!state.models.length || !localRuntime()) return;
+    var current = selectedModel();
+    var compatible = function (model) { return modelRuntimeCompatible(model); };
+    if (!current || !compatible(current)) {
+      var recommended = state.capabilities.local.recommended_model;
+      var replacement = state.models.find(function (model) { return model.id === recommended && compatible(model); }) || state.models.find(compatible);
+      if (replacement) modelSelect.value = replacement.id;
+    }
+    modelSelect.querySelectorAll("option").forEach(function (option) {
+      var item = state.models.find(function (model) { return model.id === option.value; });
+      option.disabled = state.mode !== "cloud" && Boolean(item && !compatible(item));
+    });
+  }
+
   function pulseFollowControl() {
     var control = $("#autoscroll-toggle").closest(".toggle-label");
     if (!control) return;
@@ -255,32 +304,40 @@
       return;
     }
     var ready = model.status === "ready" || model.status === "runtime_download";
+    var runtimeMismatch = state.mode !== "cloud" && !modelRuntimeCompatible(model);
+    var languageMismatch = state.mode !== "cloud" && !modelLanguageCompatible(model);
     badge.textContent = state.mode === "cloud" ? "云端转录" : (model.best_for || model.languages || "本地模型");
-    chip.textContent = state.mode === "cloud" ? "由服务配置" : ready ? "已就绪" : model.status === "downloading" ? "下载中" : "未下载";
-    chip.classList.toggle("is-ready", ready || state.mode === "cloud");
-    chip.classList.toggle("is-warning", !ready && state.mode !== "cloud");
+    chip.textContent = state.mode === "cloud" ? "由服务配置" : runtimeMismatch ? "设备不匹配" : languageMismatch ? "语言需云端" : ready ? "已就绪" : model.status === "downloading" ? "下载中" : model.status === "dependency_missing" ? "缺少依赖" : "未下载";
+    chip.classList.toggle("is-ready", (ready && !runtimeMismatch && !languageMismatch) || state.mode === "cloud");
+    chip.classList.toggle("is-warning", (!ready || runtimeMismatch || languageMismatch) && state.mode !== "cloud");
     speed.textContent = state.mode === "cloud" ? "取决于网络" : (model.speed || "—");
     quality.textContent = model.quality || "—";
     resource.textContent = state.mode === "cloud" ? "本机低" : (model.resource || "—");
     summary.textContent = state.mode === "cloud"
       ? "云端路径不占用本机推理算力；实际延迟取决于网络和云端服务。"
+      : runtimeMismatch
+        ? (localRuntime() === "mlx" ? "这台 Mac 只使用 MLX 模型；请选择 Parakeet TDT v3。" : "这是 Mac MLX 模型，请选择当前设备支持的 Whisper 模型。")
+        : languageMismatch
+          ? "Parakeet 当前适合英语和欧洲语言课堂；中文课程请切换到云端。"
       : (model.languages || "多语言") + " · " + (model.size || "需要模型文件") + " · 适合：" + (model.best_for || "通用转录");
   }
 
   function updateCapabilityUi(data) {
     state.capabilities = data;
-    var device = data.local && data.local.device ? data.local.device : {};
     var localAvailable = Boolean(data.local && data.local.available);
     var cloudAvailable = Boolean(data.cloud && data.cloud.configured);
+    var runtime = data.local && data.local.runtime ? data.local.runtime : "";
     var readyCount = data.local && Array.isArray(data.local.ready_models) ? data.local.ready_models.length : 0;
-    var title = localAvailable ? "本地路径可用" : cloudAvailable ? "云端路径已就绪" : "需要准备一个转录路径";
+    var title = localAvailable ? (runtime === "mlx" ? "Mac MLX 本地路径可用" : runtime === "cuda" ? "CUDA GPU 本地路径可用" : "CPU 本地路径可用") : cloudAvailable ? "云端路径已就绪" : "需要准备一个转录路径";
     var note = localAvailable
-      ? (device.label || "当前设备") + " · 已准备 " + readyCount + " 个本地模型 · 推荐 " + (data.local.recommended_model || "small")
+      ? runtimeCopy(runtime) + " · 已准备 " + readyCount + " 个本地模型 · 推荐 " + (data.local.recommended_model || "small")
       : cloudAvailable
         ? "本地模型不可用时可以使用已配置云端"
         : "安装本地依赖，或在 .env 中配置云端模型";
     $("#capability-title").textContent = title;
     $("#capability-note").textContent = note;
+    $("#runtime-badge").textContent = runtimeCopy(runtime);
+    $("#runtime-badge").className = "runtime-badge" + (runtime ? " is-" + runtime : "");
     $("#model-status").textContent = localAvailable ? "本地能力已检查" : cloudAvailable ? "云端能力已检查" : "等待模型配置";
     $("#capability-panel").classList.toggle("is-warning", !localAvailable && !cloudAvailable);
     updateTranslationUi();
@@ -323,12 +380,15 @@
       .catch(function () {
         $("#capability-title").textContent = "设备检测暂不可用";
         $("#capability-note").textContent = "你仍可以尝试开始，或检查后端是否已启动。";
+        $("#runtime-badge").textContent = "检测失败";
         renderReadiness();
       });
   }
 
   function modelStatusText(model) {
     if (!model) return "模型信息暂不可用";
+    if (state.mode !== "cloud" && !modelRuntimeCompatible(model)) return localRuntime() === "mlx" ? "当前 Mac 只使用 MLX Parakeet，请重新选择模型" : "当前设备不支持 Mac MLX 模型";
+    if (state.mode !== "cloud" && !modelLanguageCompatible(model)) return "Parakeet 当前不支持这门语言，请切换到云端";
     if (model.status === "ready") return model.label + " 已就绪" + (model.size ? " · " + model.size : "");
     if (model.status === "downloading") return model.label + " 正在下载 · " + (model.progress || 0) + "%";
     if (model.status === "dependency_missing") return "本地依赖未安装 · 可切换云端";
@@ -341,7 +401,7 @@
     row.classList.remove("is-ready", "is-warning", "is-error", "is-busy");
     if (status === "ready") row.classList.add("is-ready");
     if (status === "downloading" || status === "not_downloaded" || status === "pending") row.classList.add("is-warning");
-    if (status === "failed" || status === "dependency_missing" || status === "error") row.classList.add("is-error");
+    if (status === "failed" || status === "dependency_missing" || status === "error" || status === "incompatible") row.classList.add("is-error");
   }
 
   function formatBytes(bytes) {
@@ -401,16 +461,18 @@
     var statusNode = $("#model-readiness-status");
     var button = $("#model-download-button");
     var status = model ? model.status : "pending";
+    var incompatible = state.mode !== "cloud" && model && (!modelRuntimeCompatible(model) || !modelLanguageCompatible(model));
     var cloudReady = state.mode === "cloud" && state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured;
     renderModelGuidance(model);
-    setRowState(row, cloudReady ? "ready" : status);
+    setRowState(row, cloudReady ? "ready" : incompatible ? "incompatible" : status);
     statusNode.textContent = state.mode === "cloud" ? (cloudReady ? "云端服务已配置，可以开始" : "云端尚未配置，请改用本地或配置服务") : modelStatusText(model);
-    button.hidden = state.mode === "cloud" || !model || !model.download_supported || model.status === "ready" || model.status === "dependency_missing";
+    button.hidden = state.mode === "cloud" || incompatible || !model || !model.download_supported || model.status === "ready" || model.status === "dependency_missing";
     if (!button.hidden) button.textContent = model.status === "downloading" ? "取消下载" : model.status === "failed" ? "重试下载" : "下载 " + model.label;
     modelSelect.querySelectorAll("option").forEach(function (option) {
       var item = state.models.find(function (entry) { return entry.id === option.value; });
-      if (item) option.textContent = item.label + " · " + (item.status === "ready" ? "已就绪" : item.status === "downloading" ? (item.progress || 0) + "%" : item.size);
+      if (item) option.textContent = item.label + " · " + (item.runtime === "mlx" ? "MLX" : "标准") + " · " + (item.status === "ready" ? "已就绪" : item.status === "downloading" ? (item.progress || 0) + "%" : item.size);
     });
+    syncRuntimeModelSelection();
   }
 
   function renderReadiness() {
@@ -425,7 +487,7 @@
     setRowState($("#connection-readiness-row"), connectionReady ? "ready" : "error");
     $("#connection-readiness-check").textContent = connectionReady ? "✓" : "!";
     var model = selectedModel();
-    var modelReady = state.mode === "cloud" ? Boolean(state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured) : model && ["ready", "runtime_download"].indexOf(model.status) !== -1;
+    var modelReady = state.mode === "cloud" ? Boolean(state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured) : localModelUsable(model);
     var audioReady = !state.saveAudio || state.audioReadiness === "ready";
     var basicReady = Boolean(connectionReady && modelReady && audioReady);
     $("#readiness-summary").textContent = basicReady ? "可以开始" : "还需准备";
@@ -438,6 +500,7 @@
       .then(function (response) { if (!response.ok) throw new Error("models request failed"); return response.json(); })
       .then(function (data) {
         state.models = data.models || [];
+        syncRuntimeModelSelection();
         renderReadiness();
         var downloading = state.models.some(function (model) { return model.status === "downloading"; });
         if (downloading && !state.modelPollTimer) state.modelPollTimer = window.setInterval(fetchModels, 750);
@@ -867,7 +930,7 @@
   function readyToStart() {
     if (state.mode === "cloud") return Boolean(state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured);
     var model = selectedModel();
-    return Boolean(model && ["ready", "runtime_download"].indexOf(model.status) !== -1);
+    return localModelUsable(model);
   }
 
   async function startListening() {
@@ -879,9 +942,10 @@
     var outgoingMode = state.mode;
     if (!readyToStart()) {
       if (state.mode === "auto" && state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured) {
-        return showError("本地模型还没有准备好", "自动模式将使用已配置云端并发送音频；请先明确切换到云端。", "switch-cloud");
+        outgoingMode = "cloud";
+      } else {
+        return showError("模型还没有准备好", model ? modelStatusText(model) : "请选择一个可用模型", "download-model", "MODEL_NOT_READY");
       }
-      return showError("模型还没有准备好", model ? modelStatusText(model) : "请选择一个可用模型", "download-model", "MODEL_NOT_READY");
     }
     if (state.saveAudio && !(await checkAudioReadiness())) return showError("原声保存不可用", "请关闭“保存原声”后仅保存字幕，或检查浏览器存储权限", "disable-audio", "AUDIO_STORAGE_UNAVAILABLE");
     if (!translationReady()) return showError("翻译服务未就绪", $("#translation-status").textContent, "", "TRANSLATION_NOT_CONFIGURED");
@@ -892,7 +956,7 @@
     try {
       state.stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
       await refreshMicrophones();
-      if (state.mode === "auto" && model && model.status !== "ready") outgoingMode = "cloud";
+      if (state.mode === "auto" && !localModelUsable(model)) outgoingMode = "cloud";
       var payload = { mode: outgoingMode, model: modelSelect.value, language: $("#language-select").value, sample_rate: 16000, enable_vad: true };
       setAppPhase("preparing", "正在加载模型", model ? modelStatusText(model) : "正在启动转录服务");
       var completed = false;
@@ -911,7 +975,7 @@
         state.starting = false;
         if (!result || result.status !== "success") {
           releaseCapture();
-          return showError(result && result.error ? result.error.message : "无法开始转录", result && result.error ? result.error.action : "请切换推理路径后重试", "download-model", result && result.error ? result.error.code : "START_FAILED");
+          return showError(result && result.error ? result.error.message : "无法开始转录", result && result.error ? result.error.action : "请切换推理路径后重试", null, result && result.error ? result.error.code : "START_FAILED");
         }
         state.sequence = 0;
         state.audioBuffer.reset();
@@ -976,7 +1040,7 @@
       ? "云端模式会发送实时处理所需音频到已配置服务，但不会建立云端录音归档。"
       : state.mode === "local"
         ? "本地模式只在你的设备上处理音频，适合重视隐私的课堂。"
-        : "自动模式会优先使用已准备好的本地模型；本地不可用时，需明确切换到云端。";
+        : "自动模式会优先使用设备适配的本地模型；本地不适合时会使用已配置云端。";
     var audioCopy = state.saveAudio ? "原声和字幕只保存在本机。" : "当前已关闭原声保存，只保留字幕。";
     $("#privacy-copy").textContent = pathCopy + " " + audioCopy;
   }
@@ -1019,6 +1083,7 @@
         if (state.recording || state.starting) return;
         state.mode = button.dataset.mode;
         $$(".mode-option").forEach(function (option) { option.classList.toggle("is-selected", option === button); option.setAttribute("aria-pressed", option === button ? "true" : "false"); });
+        syncRuntimeModelSelection();
         updatePrivacyCopy();
         savePreferences();
         renderReadiness();
@@ -1096,7 +1161,7 @@
 
   $("#model-download-button").addEventListener("click", downloadSelectedModel);
   $("#model-select").addEventListener("change", function () { savePreferences(); renderReadiness(); });
-  $("#language-select").addEventListener("change", savePreferences);
+  $("#language-select").addEventListener("change", function () { savePreferences(); renderReadiness(); });
   $("#course-title").addEventListener("input", savePreferences);
   $("#error-action").addEventListener("click", function () {
     var action = this.dataset.action;

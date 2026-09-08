@@ -19,6 +19,15 @@ LOCAL_MODELS = (
 )
 
 
+def _model_matches_runtime(model: Mapping[str, object], runtime: str) -> bool:
+    model_runtime = str(model.get("runtime") or "standard")
+    if runtime == "mlx":
+        return model_runtime == "mlx"
+    if runtime in {"cuda", "cpu"}:
+        return model_runtime != "mlx"
+    return True
+
+
 def _translation_error_result(exc: Exception) -> dict:
     if isinstance(exc, ProviderError):
         error = exc.to_dict()
@@ -88,10 +97,13 @@ def register_routes(app: Flask, config: AppConfig) -> None:
         profile = get_device_profile()
         device = device_public_dict(profile)
         model_states = current_app.extensions["model_manager"].list_models()
+        compatible_models = [
+            model for model in model_states if _model_matches_runtime(model, device["runtime"])
+        ]
         return jsonify({
             "local": {
-                "available": any(model["dependency_available"] for model in model_states),
-                "ready_models": [model["id"] for model in model_states if model["status"] == "ready"],
+                "available": any(model["dependency_available"] for model in compatible_models),
+                "ready_models": [model["id"] for model in compatible_models if model["status"] == "ready"],
                 "device": device,
                 "runtime": device["runtime"],
                 "recommended_model": device["recommended_model"],
