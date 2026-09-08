@@ -60,9 +60,20 @@ CLOUD_BASE_URL=https://api.example.com/v1
 CLOUD_API_KEY=your-key
 CLOUD_TRANSCRIPTION_MODEL=your-transcription-model
 CLOUD_TIMEOUT_SECONDS=30
+
+# Optional fast translation / precise cloud model translation
+TRANSLATION_GOOGLE_PROJECT_ID=your-google-project
+TRANSLATION_GOOGLE_API_KEY=your-google-key
+TRANSLATION_MICROSOFT_API_KEY=your-microsoft-key
+TRANSLATION_MICROSOFT_REGION=your-resource-region
+TRANSLATION_CLOUD_BASE_URL=https://api.example.com/v1
+TRANSLATION_CLOUD_API_KEY=your-translation-model-key
+TRANSLATION_CLOUD_MODEL=your-translation-model
 ```
 
 The browser never receives `CLOUD_API_KEY`. The UI makes the current path visible and displays a privacy notice when cloud mode is selected. Read [`docs/PRIVACY.md`](docs/PRIVACY.md) before using a third-party endpoint.
+
+Real-time translation is off by default. When enabled, Google Cloud Translation or Microsoft Translator can provide quick text translation; after class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
 
 ## Start
 
@@ -79,7 +90,8 @@ Recommended classroom flow:
 1. Open the live page before class and enter a course label.
 2. Select `auto`, `local`, or `cloud`; check the detected device/provider message.
 3. Click **开始听课** and allow microphone access. The current sentence is large and bright; confirmed history remains scrollable.
-4. Stop after class. The final session is saved locally and can be searched, edited, starred, annotated or exported from **课后复习**.
+4. Leave **保存原声** enabled if you want synchronized replay during review; the default recording is local browser storage.
+5. Stop after class. The final session is saved locally and can be searched, edited, starred, translated, annotated or exported from **课后复习**.
 
 ## Troubleshooting
 
