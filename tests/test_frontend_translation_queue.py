@@ -54,3 +54,15 @@ if (calls !== 2) process.exit(2);
 '''
     result = subprocess.run(["node", "-e", "(async()=>{" + script + "})()"], cwd=Path(__file__).parents[1], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_browser_global_exposes_the_factory_name_used_by_live_app():
+    script = r'''
+const fs = require('fs');
+const vm = require('vm');
+const context = {window: {}};
+vm.runInNewContext(fs.readFileSync('./static/translation-queue.js', 'utf8'), context);
+if (!context.window.EchoTranslationQueue || typeof context.window.EchoTranslationQueue.create !== 'function') process.exit(1);
+'''
+    result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout

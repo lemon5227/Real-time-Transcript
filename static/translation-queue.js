@@ -109,5 +109,5 @@
     return api;
   }
 
-  return { createTranslationQueue: createTranslationQueue };
+  return { create: createTranslationQueue, createTranslationQueue: createTranslationQueue };
 }));
