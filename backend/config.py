@@ -47,6 +47,16 @@ class AppConfig:
     cloud_api_key: str
     cloud_transcription_model: str
     cloud_timeout_seconds: float
+    translation_google_project_id: str
+    translation_google_api_key: str
+    translation_google_location: str
+    translation_microsoft_endpoint: str
+    translation_microsoft_api_key: str
+    translation_microsoft_region: str
+    translation_cloud_base_url: str
+    translation_cloud_api_key: str
+    translation_cloud_model: str
+    translation_timeout_seconds: float
     audio_max_queue: int
     audio_window_seconds: float
     audio_overlap_seconds: float
@@ -57,6 +67,22 @@ class AppConfig:
             self.cloud_base_url
             and self.cloud_api_key
             and self.cloud_transcription_model
+        )
+
+    @property
+    def translation_google_configured(self) -> bool:
+        return bool(self.translation_google_project_id and self.translation_google_api_key)
+
+    @property
+    def translation_microsoft_configured(self) -> bool:
+        return bool(self.translation_microsoft_endpoint and self.translation_microsoft_api_key)
+
+    @property
+    def translation_cloud_configured(self) -> bool:
+        return bool(
+            self.translation_cloud_base_url
+            and self.translation_cloud_api_key
+            and self.translation_cloud_model
         )
 
     def public_dict(self) -> Dict[str, object]:
@@ -76,6 +102,18 @@ class AppConfig:
                 "max_queue": self.audio_max_queue,
                 "window_seconds": self.audio_window_seconds,
                 "overlap_seconds": self.audio_overlap_seconds,
+            },
+            "translation": {
+                "google": {"configured": self.translation_google_configured},
+                "microsoft": {
+                    "configured": self.translation_microsoft_configured,
+                    "region": self.translation_microsoft_region,
+                },
+                "cloud_model": {
+                    "configured": self.translation_cloud_configured,
+                    "model": self.translation_cloud_model,
+                },
+                "timeout_seconds": self.translation_timeout_seconds,
             },
         }
 
@@ -121,6 +159,18 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
     if cloud_base_url and not cloud_api_key:
         raise ValueError("CLOUD_API_KEY is required when CLOUD_BASE_URL is set")
 
+    translation_google_project_id = source.get("TRANSLATION_GOOGLE_PROJECT_ID", "").strip()
+    translation_google_api_key = source.get("TRANSLATION_GOOGLE_API_KEY", "").strip()
+    translation_google_location = source.get("TRANSLATION_GOOGLE_LOCATION", "global").strip() or "global"
+    translation_microsoft_endpoint = source.get(
+        "TRANSLATION_MICROSOFT_ENDPOINT", "https://api.cognitive.microsofttranslator.com"
+    ).strip().rstrip("/")
+    translation_microsoft_api_key = source.get("TRANSLATION_MICROSOFT_API_KEY", "").strip()
+    translation_microsoft_region = source.get("TRANSLATION_MICROSOFT_REGION", "").strip()
+    translation_cloud_base_url = source.get("TRANSLATION_CLOUD_BASE_URL", "").strip().rstrip("/")
+    translation_cloud_api_key = source.get("TRANSLATION_CLOUD_API_KEY", "").strip()
+    translation_cloud_model = source.get("TRANSLATION_CLOUD_MODEL", "").strip()
+
     return AppConfig(
         secret_key=source.get("SECRET_KEY", "development-only-change-me").strip()
         or "development-only-change-me",
@@ -135,6 +185,18 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         cloud_transcription_model=cloud_model,
         cloud_timeout_seconds=_parse_float(
             source.get("CLOUD_TIMEOUT_SECONDS", "30"), "CLOUD_TIMEOUT_SECONDS", 1.0
+        ),
+        translation_google_project_id=translation_google_project_id,
+        translation_google_api_key=translation_google_api_key,
+        translation_google_location=translation_google_location,
+        translation_microsoft_endpoint=translation_microsoft_endpoint,
+        translation_microsoft_api_key=translation_microsoft_api_key,
+        translation_microsoft_region=translation_microsoft_region,
+        translation_cloud_base_url=translation_cloud_base_url,
+        translation_cloud_api_key=translation_cloud_api_key,
+        translation_cloud_model=translation_cloud_model,
+        translation_timeout_seconds=_parse_float(
+            source.get("TRANSLATION_TIMEOUT_SECONDS", "20"), "TRANSLATION_TIMEOUT_SECONDS", 1.0
         ),
         audio_max_queue=_parse_int(
             source.get("AUDIO_MAX_QUEUE", "32"), "AUDIO_MAX_QUEUE", 1
