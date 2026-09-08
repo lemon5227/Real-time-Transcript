@@ -63,6 +63,15 @@ def recommend_local_model(profile: DeviceProfile) -> str:
     return "small"
 
 
+def runtime_for_profile(profile: DeviceProfile) -> str:
+    """Return the execution runtime, separate from the model family."""
+    if profile.device == "mps" and profile.kind == "apple":
+        return "mlx"
+    if profile.device == "cuda":
+        return "cuda"
+    return "cpu"
+
+
 def device_public_dict(profile: Optional[DeviceProfile] = None):
     current = profile or get_device_profile()
     return {
@@ -70,6 +79,6 @@ def device_public_dict(profile: Optional[DeviceProfile] = None):
         "kind": current.kind,
         "memory_gb": current.memory_gb,
         "performance": current.performance,
-        "runtime": "mlx" if current.device == "mps" and current.kind == "apple" else "standard",
+        "runtime": runtime_for_profile(current),
         "recommended_model": recommend_local_model(current),
     }

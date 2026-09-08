@@ -61,3 +61,37 @@ def test_audio_queue_backpressure_drops_oldest_frame_without_failing_session():
     assert dropped is True
     assert state.audio_queue.get_nowait().sequence == 1
     manager.stop("sid-1")
+
+
+def test_contiguous_provider_receives_adjacent_windows_without_whisper_overlap():
+    class ContiguousProvider(FakeProvider):
+        requires_contiguous_audio = True
+
+        def __init__(self):
+            self.chunks = []
+
+        def push(self, audio):
+            self.chunks.append(audio.copy())
+            return []
+
+    provider = ContiguousProvider()
+    manager = SessionManager(provider_factory=lambda _config: provider)
+    config = SessionConfig(
+        "local",
+        "fake",
+        "en",
+        16000,
+        window_seconds=1.0,
+        overlap_seconds=0.5,
+    )
+    manager.start("sid-1", config)
+    manager.push_audio(
+        "sid-1",
+        base64.b64encode(b"\x00\x00" * 24000).decode(),
+        sample_rate=16000,
+        sequence=1,
+    )
+
+    manager.stop("sid-1")
+
+    assert [chunk.size for chunk in provider.chunks] == [16000, 8000]

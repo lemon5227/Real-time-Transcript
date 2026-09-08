@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from backend.config import load_config
+from backend.device import DeviceProfile
 from backend.models import SessionConfig
 from backend.providers.base import ProviderError
 from backend.providers.factory import AutoFallbackProvider, ProviderFactory
@@ -101,6 +102,23 @@ def test_distil_english_model_uses_faster_whisper_on_mps(monkeypatch):
     assert captured == {"model_name": "distil-small.en", "device": "cpu", "compute_type": "int8"}
 
 
+def test_standard_local_provider_uses_cuda_when_available(monkeypatch):
+    captured = {}
+
+    class FakeWhisperModel:
+        def __init__(self, model_name, device, compute_type):
+            captured.update({"model_name": model_name, "device": device, "compute_type": compute_type})
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel))
+    from backend.providers.local_whisper import LocalWhisperProvider
+
+    profile = DeviceProfile(device="cuda", kind="nvidia", memory_gb=8.0, performance="fast")
+    provider = LocalWhisperProvider(model_name="small", device_profile=profile)
+    provider.start(SessionConfig("local", "small", "en", 16000))
+
+    assert captured == {"model_name": "small", "device": "cuda", "compute_type": "float16"}
+
+
 def test_cloud_provider_posts_audio_without_logging_secret(monkeypatch):
     from backend.providers.cloud_transcription import CloudTranscriptionProvider
 
@@ -162,3 +180,105 @@ def test_auto_provider_falls_back_when_local_model_cannot_start():
     assert provider.name == "cloud"
     assert provider.model == "cloud-model"
     assert cloud.started is True
+
+
+def test_mlx_provider_maps_stream_sentences_to_segments():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Sentence:
+        text, start, end = "Welcome to economics.", 0.2, 1.8
+
+    class Stream:
+        result = type("Result", (), {"text": "Welcome to economics.", "sentences": [Sentence()]})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, audio):
+            self.audio = audio
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert provider.name == "mlx"
+    assert provider.requires_contiguous_audio is True
+    assert result[0].text == "Welcome to economics."
+    assert result[0].is_final is True
+    assert result[0].start_ms == 200
+
+
+def test_mlx_provider_reports_missing_runtime():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: None
+    )
+    with pytest.raises(ProviderError, match="MLX_RUNTIME_UNAVAILABLE"):
+        provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+
+def test_mps_factory_selects_mlx_provider():
+    profile = DeviceProfile(device="mps", kind="apple", memory_gb=None, performance="balanced")
+    factory = ProviderFactory(
+        load_config({}),
+        local_available=lambda _model: True,
+        device_profile=profile,
+    )
+    provider = factory.create(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+    assert provider.name == "mlx"
+    assert provider.model == "mlx-community/parakeet-tdt-0.6b-v3"
+
+
+def test_mps_factory_rejects_standard_whisper_model_instead_of_using_cpu():
+    profile = DeviceProfile(device="mps", kind="apple", memory_gb=None, performance="balanced")
+    factory = ProviderFactory(
+        load_config({}),
+        local_available=lambda _model: True,
+        device_profile=profile,
+    )
+
+    with pytest.raises(ProviderError, match="LOCAL_RUNTIME_MISMATCH"):
+        factory.create(SessionConfig("local", "small", "en", 16000))
+
+
+def test_mps_auto_mode_replaces_legacy_model_with_mlx_recommendation():
+    calls = []
+    config = load_config({
+        "CLOUD_BASE_URL": "https://example.test/v1",
+        "CLOUD_API_KEY": "key",
+        "CLOUD_TRANSCRIPTION_MODEL": "transcribe-test",
+    })
+    profile = DeviceProfile(device="mps", kind="apple", memory_gb=None, performance="balanced")
+    factory = ProviderFactory(
+        config,
+        local_available=lambda model: calls.append(model) or False,
+        device_profile=profile,
+    )
+
+    provider = factory.create(SessionConfig("auto", "small", "en", 16000))
+
+    assert provider.name == "cloud"
+    assert calls == ["parakeet-tdt-0.6b-v3"]
+
+
+def test_cpu_factory_selects_standard_provider():
+    profile = DeviceProfile(device="cpu", kind="cpu", memory_gb=16.0, performance="fast")
+    factory = ProviderFactory(
+        load_config({}),
+        local_available=lambda _model: True,
+        device_profile=profile,
+    )
+    provider = factory.create(SessionConfig("local", "small", "en", 16000))
+
+    assert provider.name == "local"

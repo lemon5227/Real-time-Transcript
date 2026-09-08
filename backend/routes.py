@@ -7,7 +7,6 @@ from .config import AppConfig
 from .device import device_public_dict, get_device_profile
 from .models import SessionConfig
 from .providers.base import ProviderError
-from .providers.local_whisper import local_model_available
 
 LOCAL_MODELS = (
     {"id": "parakeet-tdt-0.6b-v3", "label": "Parakeet TDT v3 · Mac MLX", "model_ref": "mlx-community/parakeet-tdt-0.6b-v3", "runtime": "mlx", "size": "~1.2GB", "speed": "最快", "quality": "很好", "resource": "中", "languages": "英语 / 24 种欧洲语言", "best_for": "Apple Silicon · 英语课堂"},

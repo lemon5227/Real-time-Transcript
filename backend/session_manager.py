@@ -65,7 +65,11 @@ class SessionManager:
                 provider=provider,
                 audio_buffer=AudioWindowBuffer(
                     window_seconds=config.window_seconds,
-                    overlap_seconds=config.overlap_seconds,
+                    overlap_seconds=(
+                        0.0
+                        if getattr(provider, "requires_contiguous_audio", False)
+                        else config.overlap_seconds
+                    ),
                 ),
                 merger=SegmentMerger(),
                 audio_queue=queue.Queue(maxsize=config.max_queue),

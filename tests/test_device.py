@@ -1,4 +1,9 @@
-from backend.device import DeviceProfile, device_public_dict, recommend_local_model
+from backend.device import (
+    DeviceProfile,
+    device_public_dict,
+    recommend_local_model,
+    runtime_for_profile,
+)
 
 
 def test_cpu_low_memory_recommends_tiny_or_base():
@@ -19,3 +24,15 @@ def test_mps_recommends_apple_silicon_mlx_model():
 def test_mps_device_reports_mlx_runtime():
     profile = DeviceProfile(device="mps", kind="apple", memory_gb=None, performance="balanced")
     assert device_public_dict(profile)["runtime"] == "mlx"
+
+
+def test_cuda_device_reports_cuda_runtime():
+    profile = DeviceProfile(device="cuda", kind="nvidia", memory_gb=8.0, performance="fast")
+    assert runtime_for_profile(profile) == "cuda"
+    assert device_public_dict(profile)["runtime"] == "cuda"
+
+
+def test_cpu_device_reports_cpu_runtime():
+    profile = DeviceProfile(device="cpu", kind="cpu", memory_gb=4.0, performance="limited")
+    assert runtime_for_profile(profile) == "cpu"
+    assert device_public_dict(profile)["runtime"] == "cpu"

@@ -11,10 +11,10 @@
 ## Global Constraints
 
 - Apple Silicon local transcription uses MLX and never silently falls back to the current CPU-only Distil Whisper path.
-- Windows, Linux, and Intel Macs keep the standard faster-whisper/Whisper path.
+- Windows, Linux, and Intel Macs keep the standard faster-whisper/Whisper path; CUDA is used automatically when an NVIDIA GPU is available, otherwise CPU is used.
 - Cloud is a separate provider and remains available to auto mode.
 - Heavy MLX/Whisper packages are lazy imports.
-- Parakeet v3 is for English and European-language lectures; on Mac, Chinese or unsupported languages must explicitly use cloud until a second MLX multilingual model is added. Standard Whisper remains for non-Mac platforms.
+- Parakeet v3 is for English and European-language lectures; on Mac, Chinese or unsupported languages must explicitly use cloud until a second MLX multilingual model is added. Standard Whisper remains the independent CUDA/CPU version for non-Mac platforms.
 - MLX input is contiguous mono 16 kHz audio and output uses TranscriptSegment.
 
 ---
@@ -109,7 +109,7 @@ def test_mac_runtime_install_and_ui_contracts():
 ## Verification Checklist
 
 - Apple Silicon reports runtime "mlx" and recommends Parakeet.
-- CPU/CUDA/Intel reports runtime "standard" and recommends Whisper.
+- CUDA reports the standard runtime with CUDA acceleration; CPU/Intel reports the standard runtime with CPU fallback and cloud available in auto mode.
 - Missing parakeet_mlx is actionable and does not load MLX at app startup.
 - MLX audio is contiguous and non-overlapping; standard Whisper keeps overlap.
 - UI exposes runtime, readiness, speed, quality, resource pressure, supported-language limits, and cloud fallback.

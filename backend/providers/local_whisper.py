@@ -43,7 +43,7 @@ class LocalWhisperProvider:
                     compute_type=self._compute_type(),
                 )
                 self._backend = "fake" if self._model is not None else None
-            elif self.model == "distil-small.en":
+            elif self.model == "distil-small.en" and self.device != "cuda":
                 from faster_whisper import WhisperModel
 
                 self._model = WhisperModel(
