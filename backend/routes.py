@@ -10,12 +10,13 @@ from .providers.base import ProviderError
 from .providers.local_whisper import local_model_available
 
 LOCAL_MODELS = (
-    {"id": "distil-small.en", "label": "Distil Small EN", "size": "~336MB", "speed": "快", "quality": "好", "resource": "低", "languages": "英语", "best_for": "英语课堂 · 轻薄本"},
-    {"id": "tiny", "label": "Tiny", "size": "~75MB", "speed": "最快", "quality": "基础", "resource": "最低", "languages": "多语言", "best_for": "低配 CPU"},
-    {"id": "base", "label": "Base", "size": "~145MB", "speed": "快", "quality": "不错", "resource": "低", "languages": "多语言", "best_for": "普通 CPU"},
-    {"id": "small", "label": "Small", "size": "~465MB", "speed": "中等", "quality": "较好", "resource": "中", "languages": "多语言", "best_for": "课堂均衡"},
-    {"id": "medium", "label": "Medium", "size": "~1.5GB", "speed": "较慢", "quality": "更好", "resource": "高", "languages": "多语言", "best_for": "较高准确率"},
-    {"id": "large-v3-turbo", "label": "Large v3 Turbo", "size": "大模型", "speed": "GPU 快", "quality": "最高", "resource": "很高", "languages": "多语言", "best_for": "高性能 GPU"},
+    {"id": "parakeet-tdt-0.6b-v3", "label": "Parakeet TDT v3 · Mac MLX", "model_ref": "mlx-community/parakeet-tdt-0.6b-v3", "runtime": "mlx", "size": "~1.2GB", "speed": "最快", "quality": "很好", "resource": "中", "languages": "英语 / 24 种欧洲语言", "best_for": "Apple Silicon · 英语课堂"},
+    {"id": "distil-small.en", "label": "Distil Small EN", "model_ref": "distil-small.en", "runtime": "standard", "size": "~336MB", "speed": "快", "quality": "好", "resource": "低", "languages": "英语", "best_for": "英语课堂 · 普通 CPU"},
+    {"id": "tiny", "label": "Tiny", "model_ref": "tiny", "runtime": "standard", "size": "~75MB", "speed": "最快", "quality": "基础", "resource": "最低", "languages": "多语言", "best_for": "低配 CPU"},
+    {"id": "base", "label": "Base", "model_ref": "base", "runtime": "standard", "size": "~145MB", "speed": "快", "quality": "不错", "resource": "低", "languages": "多语言", "best_for": "普通 CPU"},
+    {"id": "small", "label": "Small", "model_ref": "small", "runtime": "standard", "size": "~465MB", "speed": "中等", "quality": "较好", "resource": "中", "languages": "多语言", "best_for": "课堂均衡"},
+    {"id": "medium", "label": "Medium", "model_ref": "medium", "runtime": "standard", "size": "~1.5GB", "speed": "较慢", "quality": "更好", "resource": "高", "languages": "多语言", "best_for": "较高准确率"},
+    {"id": "large-v3-turbo", "label": "Large v3 Turbo", "model_ref": "large-v3-turbo", "runtime": "standard", "size": "大模型", "speed": "GPU 快", "quality": "最高", "resource": "很高", "languages": "多语言", "best_for": "高性能 GPU"},
 )
 
 
@@ -90,9 +91,10 @@ def register_routes(app: Flask, config: AppConfig) -> None:
         model_states = current_app.extensions["model_manager"].list_models()
         return jsonify({
             "local": {
-                "available": any(local_model_available(model["id"]) for model in LOCAL_MODELS),
+                "available": any(model["dependency_available"] for model in model_states),
                 "ready_models": [model["id"] for model in model_states if model["status"] == "ready"],
                 "device": device,
+                "runtime": device["runtime"],
                 "recommended_model": device["recommended_model"],
             },
             "cloud": {

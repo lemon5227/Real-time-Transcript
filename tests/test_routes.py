@@ -48,6 +48,15 @@ def test_models_endpoint_exposes_selection_guidance():
     assert {"speed", "quality", "resource", "languages", "best_for"}.issubset(model)
 
 
+def test_catalog_marks_runtime_families():
+    app = create_app({})
+    models = app.test_client().get("/api/models").get_json()["models"]
+    by_id = {model["id"]: model for model in models}
+    assert by_id["parakeet-tdt-0.6b-v3"]["runtime"] == "mlx"
+    assert by_id["small"]["runtime"] == "standard"
+    assert by_id["parakeet-tdt-0.6b-v3"]["model_ref"] == "mlx-community/parakeet-tdt-0.6b-v3"
+
+
 def test_model_download_endpoint_rejects_unknown_model():
     app = create_app({})
     response = app.test_client().post("/api/models/not-a-model/download")

@@ -17,6 +17,7 @@ def test_model_manager_reports_cached_weights(tmp_path):
     assert model["status"] == "ready"
     assert model["weights_available"] is True
     assert model["downloaded_bytes"] == 5
+    assert model["runtime"] == "standard"
 
 
 def test_model_manager_starts_one_async_download(tmp_path, monkeypatch):

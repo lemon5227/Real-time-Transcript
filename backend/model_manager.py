@@ -33,8 +33,13 @@ class ModelManager:
         self._cancel_events: Dict[str, threading.Event] = {}
         self._lock = threading.RLock()
 
-    @staticmethod
-    def _default_dependency_checker(model_id: str) -> bool:
+    def _default_dependency_checker(self, model_id: str) -> bool:
+        runtime = str(self._catalog.get(model_id, {}).get("runtime") or "standard")
+        if runtime == "mlx":
+            try:
+                return importlib.util.find_spec("parakeet_mlx") is not None
+            except (ImportError, ValueError):
+                return False
         try:
             module = importlib.import_module("backend.providers.local_whisper")
             return bool(module.local_model_available(model_id))
@@ -118,6 +123,8 @@ class ModelManager:
         return self.get_model(model_id)
 
     def _resolve_url(self, model_id: str) -> Optional[str]:
+        if str(self._catalog[model_id].get("runtime") or "standard") == "mlx":
+            return None
         configured = self._catalog[model_id].get("url")
         if configured:
             return str(configured)
@@ -133,6 +140,8 @@ class ModelManager:
 
     def _snapshot(self, model_id: str):
         model = dict(self._catalog[model_id])
+        model.setdefault("runtime", "standard")
+        model.setdefault("model_ref", model_id)
         dependency_available = bool(self._dependency_checker(model_id))
         url = self._resolve_url(model_id) if dependency_available else None
         target = self._target_path(model_id, url)

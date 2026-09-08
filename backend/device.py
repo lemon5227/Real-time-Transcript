@@ -55,7 +55,7 @@ def recommend_local_model(profile: DeviceProfile) -> str:
             return "small"
         return "base"
     if profile.device == "mps":
-        return "distil-small.en"
+        return "parakeet-tdt-0.6b-v3"
     if profile.memory_gb is not None and profile.memory_gb <= 4:
         return "tiny"
     if profile.performance == "limited":
@@ -70,5 +70,6 @@ def device_public_dict(profile: Optional[DeviceProfile] = None):
         "kind": current.kind,
         "memory_gb": current.memory_gb,
         "performance": current.performance,
+        "runtime": "mlx" if current.device == "mps" and current.kind == "apple" else "standard",
         "recommended_model": recommend_local_model(current),
     }
