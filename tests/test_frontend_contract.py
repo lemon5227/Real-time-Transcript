@@ -50,6 +50,18 @@ def test_live_page_loads_local_audio_recording_dependencies():
     assert "MediaRecorder" in recorder
 
 
+def test_live_page_exposes_default_local_audio_save_controls():
+    app = create_app({})
+    html = app.test_client().get("/").get_data(as_text=True)
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+    for hook in ["save-audio", "audio-readiness-status", "audio-storage-status"]:
+        assert hook in html
+    for hook in ["saveAudio: true", "EchoAudioRecorder", "正在保存原声", "仅保存字幕"]:
+        assert hook in javascript
+    storage = app.test_client().get("/static/audio-storage.js").get_data(as_text=True)
+    assert "createRecording" in storage
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript

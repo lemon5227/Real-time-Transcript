@@ -112,12 +112,18 @@
                 <div class="readiness-row" id="model-readiness-row"><span class="readiness-icon" aria-hidden="true">✦</span><div><strong>转录模型</strong><small id="model-readiness-status">正在检查模型</small></div><button class="readiness-action" id="model-download-button" type="button" hidden>下载模型</button></div>
                 <div class="readiness-row" id="mic-readiness-row"><span class="readiness-icon" aria-hidden="true">⌁</span><div><strong>麦克风</strong><small id="mic-readiness-status">选择设备并测试声音</small></div><span class="readiness-check" id="mic-readiness-check" aria-hidden="true">○</span></div>
                 <div class="readiness-row" id="connection-readiness-row"><span class="readiness-icon" aria-hidden="true">↗</span><div><strong>实时连接</strong><small id="connection-readiness-status">等待后端连接</small></div><span class="readiness-check" id="connection-readiness-check" aria-hidden="true">○</span></div>
+                <div class="readiness-row" id="audio-readiness-row"><span class="readiness-icon" aria-hidden="true">♫</span><div><strong>原声保存</strong><small id="audio-readiness-status">正在检查本机存储</small></div><span class="readiness-check" id="audio-readiness-check" aria-hidden="true">○</span></div>
               </div>
             </section>
 
             <div class="microphone-tools" id="microphone-tools">
               <div class="field-block"><label class="field-label" for="microphone-select">输入设备</label><select class="text-input select-input" id="microphone-select"><option value="">浏览器默认麦克风</option></select></div>
               <div class="mic-test-row"><button class="secondary-button" id="test-microphone" type="button">测试麦克风</button><div class="mic-meter-wrap"><div class="mic-meter" id="mic-level" role="progressbar" aria-label="麦克风输入音量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="mic-level-fill"></span></div><span id="mic-level-label">尚未测试</span></div></div>
+            </div>
+
+            <div class="audio-save-row">
+              <label class="audio-save-option" for="save-audio"><input id="save-audio" type="checkbox" checked><span><strong>保存原声</strong><small>推荐 · 仅本机</small></span></label>
+              <small id="audio-storage-status">原声会按片段持续保存在本机浏览器</small>
             </div>
 
             <div class="privacy-note"><span aria-hidden="true">◌</span><p><strong>隐私提示</strong><br><span id="privacy-copy">自动模式会优先使用已准备好的本地模型；本地不可用时，需确认后才会发送音频到云端。</span></p></div>
