@@ -71,6 +71,7 @@ def test_live_page_exposes_translation_controls_and_queue():
         assert hook in html
     for hook in ["EchoTranslationQueue", "translation_result", "实时翻译", "翻译失败"]:
         assert hook in javascript
+    assert "local_model" in app.test_client().get("/api/capabilities").get_data(as_text=True)
     assert "batchSize" in queue
 
 

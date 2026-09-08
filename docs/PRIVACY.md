@@ -18,7 +18,7 @@ Auto mode tries local startup first. If the local model cannot load and cloud se
 
 ## Translation mode
 
-Translation is a separate text-only path. Google Cloud Translation and Microsoft Translator receive generated caption text, never the original audio. Precise translation can use an injected local model or an explicitly configured OpenAI-compatible cloud model. Real-time translation is off by default; when enabled, only final caption batches are sent.
+Translation is a separate text-only path. Google’s best-effort public web path, Google Cloud Translation and Microsoft Translator receive generated caption text, never the original audio. Precise translation can use a local OpenAI-compatible endpoint (such as Ollama or LM Studio) or an explicitly configured cloud model. Real-time translation is off by default; when enabled, only final caption batches are sent.
 
 Translation API keys are read from backend environment variables: `TRANSLATION_GOOGLE_API_KEY`, `TRANSLATION_MICROSOFT_API_KEY` and `TRANSLATION_CLOUD_API_KEY`. They are not placed in browser JavaScript, URLs or public capability responses. If a cloud translation provider is selected, the caption text may leave the computer; the UI displays that provider path before class.
 

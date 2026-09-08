@@ -241,18 +241,23 @@
 
   function translationReady() {
     if (state.translationMode === "off") return true;
-    if (state.translationMode === "fast") return translationCapability(state.translationProvider).configured;
-    var cloud = state.capabilities && state.capabilities.translation && state.capabilities.translation.cloud_model;
-    return state.translationModelMode === "cloud" || state.translationModelMode === "auto" || state.translationMode === "auto"
-      ? Boolean(cloud && cloud.configured)
-      : false;
+    if (state.translationMode === "fast") {
+      var fastCapability = translationCapability(state.translationProvider);
+      return Boolean(fastCapability.configured || fastCapability.public_fallback);
+    }
+    var local = translationCapability("local_model");
+    var cloud = translationCapability("cloud_model");
+    if (state.translationModelMode === "local") return Boolean(local.configured);
+    if (state.translationModelMode === "cloud") return Boolean(cloud.configured);
+    return Boolean(local.configured || cloud.configured);
   }
 
   function updateTranslationUi() {
     var node = $("#translation-status");
     if (!node) return;
     var mode = state.translationMode;
-    var provider = mode === "fast" ? state.translationProvider === "microsoft" ? "Microsoft 快速翻译" : "Google 快速翻译" : mode === "off" ? "实时翻译默认关闭；课后可以再翻译" : state.translationModelMode === "local" ? "本地精确翻译" : "精确翻译会使用可用的模型服务";
+    var google = translationCapability("google");
+    var provider = mode === "fast" ? state.translationProvider === "microsoft" ? "Microsoft 快速翻译" : google.configured ? "Google Cloud 快速翻译" : "Google 公共翻译 · 免 Key" : mode === "off" ? "实时翻译默认关闭；课后可以再翻译" : state.translationModelMode === "local" ? "本地精确翻译" : state.translationModelMode === "cloud" ? "云端精确翻译" : "自动选择精确模型";
     var ready = translationReady();
     node.textContent = ready ? provider + " · 目标：" + (translationTargetSelect.options[translationTargetSelect.selectedIndex] ? translationTargetSelect.options[translationTargetSelect.selectedIndex].textContent : "中文") : provider + "尚未配置，课堂仍可只做原文转录";
     node.classList.toggle("is-warning", !ready && mode !== "off");
@@ -520,7 +525,7 @@
             target_language: state.translationTarget,
             mode: state.translationMode === "fast" ? "fast" : state.translationMode === "precise" ? "model" : state.translationMode,
             provider: state.translationMode === "fast" ? state.translationProvider : state.translationModelMode,
-            local_ready: false
+            local_ready: translationCapability("local_model").configured
           }, function (result) {
             if (!result || result.status !== "success") {
               var error = new Error(result && result.error ? result.error.message : "翻译失败");

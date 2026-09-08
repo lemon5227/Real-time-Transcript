@@ -73,7 +73,7 @@ TRANSLATION_CLOUD_MODEL=your-translation-model
 
 The browser never receives `CLOUD_API_KEY`. The UI makes the current path visible and displays a privacy notice when cloud mode is selected. Read [`docs/PRIVACY.md`](docs/PRIVACY.md) before using a third-party endpoint.
 
-Real-time translation is off by default. When enabled, Google Cloud Translation or Microsoft Translator can provide quick text translation; after class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
+Real-time translation is off by default. When enabled, a best-effort Google public path can work without a key; Google Cloud Translation or Microsoft Translator can provide more stable quick text translation when configured. After class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Precise local translation can use an OpenAI-compatible Ollama/LM Studio endpoint; cloud precise translation uses the configured OpenAI-compatible endpoint. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
 
 ## Start
 

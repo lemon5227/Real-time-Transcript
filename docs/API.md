@@ -142,4 +142,4 @@ The cloud provider sends each normalized audio window as an in-memory WAV `POST`
 
 ## Translation provider boundary
 
-Google fast translation uses `TRANSLATION_GOOGLE_PROJECT_ID`, `TRANSLATION_GOOGLE_API_KEY` and `TRANSLATION_GOOGLE_LOCATION`. Microsoft fast translation uses `TRANSLATION_MICROSOFT_ENDPOINT`, `TRANSLATION_MICROSOFT_API_KEY` and the optional region. Precise cloud translation uses `TRANSLATION_CLOUD_BASE_URL`, `TRANSLATION_CLOUD_API_KEY` and `TRANSLATION_CLOUD_MODEL`. All keys are backend-only.
+Google fast translation first uses the no-key public web path when official credentials are absent; setting `TRANSLATION_GOOGLE_PROJECT_ID`, `TRANSLATION_GOOGLE_API_KEY` and `TRANSLATION_GOOGLE_LOCATION` enables the official Cloud Translation path. Microsoft fast translation uses `TRANSLATION_MICROSOFT_ENDPOINT`, `TRANSLATION_MICROSOFT_API_KEY` and the optional region. Precise local translation uses the OpenAI-compatible `TRANSLATION_LOCAL_BASE_URL` and `TRANSLATION_LOCAL_MODEL` (local API key is optional); precise cloud translation uses `TRANSLATION_CLOUD_BASE_URL`, `TRANSLATION_CLOUD_API_KEY` and `TRANSLATION_CLOUD_MODEL`. All keys are backend-only.

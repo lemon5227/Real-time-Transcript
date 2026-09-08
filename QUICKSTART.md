@@ -44,7 +44,7 @@ TRANSLATION_MICROSOFT_API_KEY=your-microsoft-key
 TRANSLATION_MICROSOFT_REGION=your-resource-region
 ```
 
-Use the Google or Microsoft selector in the classroom page for quick translation. For precise translation, configure `TRANSLATION_CLOUD_BASE_URL`, `TRANSLATION_CLOUD_API_KEY` and `TRANSLATION_CLOUD_MODEL`; a local model adapter can be supplied by a future local translation runtime. Keys remain in the backend `.env` and translation sends text only, never the saved original audio.
+Use the Google or Microsoft selector in the classroom page for quick translation. Google has a best-effort public path that works without a key; configure the official Google or Microsoft variables when you need a more stable service. For precise local translation, run an OpenAI-compatible local server such as Ollama or LM Studio and set `TRANSLATION_LOCAL_BASE_URL` and `TRANSLATION_LOCAL_MODEL`; an API key is optional for local servers. For cloud precise translation, configure `TRANSLATION_CLOUD_BASE_URL`, `TRANSLATION_CLOUD_API_KEY` and `TRANSLATION_CLOUD_MODEL`. Keys remain in the backend `.env` and translation sends text only, never the saved original audio.
 
 ## 3. Use it in class
 

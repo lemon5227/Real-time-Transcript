@@ -77,11 +77,11 @@ def parse_model_translation_content(content: object, expected: int) -> List[str]
 
 
 class ModelTranslationProvider:
-    """A local callable or OpenAI-compatible cloud translation adapter.
+    """A callable or OpenAI-compatible local/cloud translation adapter.
 
-    The local runtime is injected so importing the web app never imports a heavy
-    translation model. A cloud endpoint is used only when it is explicitly
-    configured.
+    A local runtime can be injected so importing the web app never imports a
+    heavy translation model. Local servers such as Ollama or LM Studio can
+    also be used through their OpenAI-compatible endpoint without an API key.
     """
 
     mode = "model"
@@ -118,11 +118,12 @@ class ModelTranslationProvider:
                 raise ProviderError("TRANSLATION_INVALID_RESPONSE", "翻译模型返回的数量不匹配")
             return [str(item).strip() for item in result]
 
-        if not self.base_url or not self.api_key or not self.model:
+        requires_api_key = self.name != "local"
+        if not self.base_url or not self.model or (requires_api_key and not self.api_key):
             raise ProviderError(
                 "TRANSLATION_NOT_CONFIGURED",
-                "精确翻译模型尚未配置",
-                "准备本地翻译模型，或配置云端翻译模型",
+                "本地翻译模型尚未配置" if self.name == "local" else "云端翻译模型尚未配置",
+                "启动本地 OpenAI-compatible 服务，或配置云端翻译模型",
             )
         try:
             import requests
@@ -154,19 +155,23 @@ class ModelTranslationProvider:
                 },
             ],
         }
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = "Bearer " + self.api_key
+        label = "本地模型翻译" if self.name == "local" else "云端模型翻译"
         try:
             response = http.post(
                 self.base_url + "/chat/completions",
-                headers={"Authorization": "Bearer " + self.api_key},
+                headers=headers,
                 json=body,
                 timeout=self.timeout_seconds,
             )
         except requests.Timeout as exc:
-            raise ProviderError("TRANSLATION_TIMEOUT", "云端模型翻译超时", "稍后重试或切换本地模型") from exc
+            raise ProviderError("TRANSLATION_TIMEOUT", label + "超时", "稍后重试或切换另一种模型") from exc
         except requests.ConnectionError as exc:
-            raise ProviderError("TRANSLATION_NETWORK_ERROR", "无法连接云端模型", "检查网络或切换本地模型") from exc
+            raise ProviderError("TRANSLATION_NETWORK_ERROR", "无法连接" + label, "检查模型服务是否已启动或切换另一种模型") from exc
         except requests.RequestException as exc:
-            raise ProviderError("TRANSLATION_REQUEST_FAILED", "云端模型翻译请求失败") from exc
+            raise ProviderError("TRANSLATION_REQUEST_FAILED", label + "请求失败") from exc
         if response.status_code >= 400:
             raise map_translation_response_error(response.status_code)
         try:
@@ -234,14 +239,19 @@ class TranslationRouter:
         )
 
 
-# Keep the public import convenient for tests and callers while provider modules
-# remain independently replaceable.
-from .providers.google_translation import GoogleTranslationProvider  # noqa: E402
-from .providers.microsoft_translation import MicrosoftTranslationProvider  # noqa: E402
+def __getattr__(name):
+    """Lazily expose concrete providers without creating an import cycle."""
+    if name == "GoogleTranslationProvider":
+        from .providers.google_translation import GoogleTranslationProvider
+
+        return GoogleTranslationProvider
+    if name == "MicrosoftTranslationProvider":
+        from .providers.microsoft_translation import MicrosoftTranslationProvider
+
+        return MicrosoftTranslationProvider
+    raise AttributeError(name)
 
 __all__ = [
-    "GoogleTranslationProvider",
-    "MicrosoftTranslationProvider",
     "ModelTranslationProvider",
     "TranslationProvider",
     "TranslationRouter",

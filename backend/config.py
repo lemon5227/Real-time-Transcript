@@ -53,6 +53,9 @@ class AppConfig:
     translation_microsoft_endpoint: str
     translation_microsoft_api_key: str
     translation_microsoft_region: str
+    translation_local_base_url: str
+    translation_local_api_key: str
+    translation_local_model: str
     translation_cloud_base_url: str
     translation_cloud_api_key: str
     translation_cloud_model: str
@@ -85,6 +88,10 @@ class AppConfig:
             and self.translation_cloud_model
         )
 
+    @property
+    def translation_local_configured(self) -> bool:
+        return bool(self.translation_local_base_url and self.translation_local_model)
+
     def public_dict(self) -> Dict[str, object]:
         return {
             "host": self.host,
@@ -104,10 +111,18 @@ class AppConfig:
                 "overlap_seconds": self.audio_overlap_seconds,
             },
             "translation": {
-                "google": {"configured": self.translation_google_configured},
+                "google": {
+                    "configured": self.translation_google_configured,
+                    "public_fallback": True,
+                },
                 "microsoft": {
                     "configured": self.translation_microsoft_configured,
                     "region": self.translation_microsoft_region,
+                },
+                "local_model": {
+                    "configured": self.translation_local_configured,
+                    "base_url": self.translation_local_base_url,
+                    "model": self.translation_local_model,
                 },
                 "cloud_model": {
                     "configured": self.translation_cloud_configured,
@@ -167,6 +182,9 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
     ).strip().rstrip("/")
     translation_microsoft_api_key = source.get("TRANSLATION_MICROSOFT_API_KEY", "").strip()
     translation_microsoft_region = source.get("TRANSLATION_MICROSOFT_REGION", "").strip()
+    translation_local_base_url = source.get("TRANSLATION_LOCAL_BASE_URL", "").strip().rstrip("/")
+    translation_local_api_key = source.get("TRANSLATION_LOCAL_API_KEY", "").strip()
+    translation_local_model = source.get("TRANSLATION_LOCAL_MODEL", "").strip()
     translation_cloud_base_url = source.get("TRANSLATION_CLOUD_BASE_URL", "").strip().rstrip("/")
     translation_cloud_api_key = source.get("TRANSLATION_CLOUD_API_KEY", "").strip()
     translation_cloud_model = source.get("TRANSLATION_CLOUD_MODEL", "").strip()
@@ -192,6 +210,9 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         translation_microsoft_endpoint=translation_microsoft_endpoint,
         translation_microsoft_api_key=translation_microsoft_api_key,
         translation_microsoft_region=translation_microsoft_region,
+        translation_local_base_url=translation_local_base_url,
+        translation_local_api_key=translation_local_api_key,
+        translation_local_model=translation_local_model,
         translation_cloud_base_url=translation_cloud_base_url,
         translation_cloud_api_key=translation_cloud_api_key,
         translation_cloud_model=translation_cloud_model,

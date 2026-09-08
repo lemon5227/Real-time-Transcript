@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 
 def test_translation_queue_filters_final_segments_batches_and_serializes_requests():

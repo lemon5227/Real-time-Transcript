@@ -18,6 +18,6 @@ cp .env.example .env
 
 ## 隐私
 
-原声默认按 10 秒片段保存在当前浏览器本机，云端转录只会把实时处理所需的音频窗口发送到 `.env` 中配置的服务，不建立云端录音归档。翻译是独立的文本路径：可选 Google Cloud 或 Microsoft 做快速翻译，也可在课后使用本地/云端模型做精确翻译；翻译不会上传原声。API Key 只在后端环境变量中保存。详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+原声默认按 10 秒片段保存在当前浏览器本机，云端转录只会把实时处理所需的音频窗口发送到 `.env` 中配置的服务，不建立云端录音归档。翻译是独立的文本路径：可选 Google Cloud 或 Microsoft 做快速翻译，也可使用 Ollama/LM Studio 等 OpenAI-compatible 本地服务，或使用云端模型做精确翻译；翻译不会上传原声。API Key 只在后端环境变量中保存。详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
 
-实时翻译默认关闭。需要快速翻译时，在 `.env` 配置 `TRANSLATION_GOOGLE_*` 或 `TRANSLATION_MICROSOFT_*`；需要模型精翻时配置 `TRANSLATION_CLOUD_*`。没有翻译配置也不影响转录、原声保存和课后复习。
+实时翻译默认关闭。快速翻译默认会尝试 Google 公共通道（免 Key，但不保证稳定）；需要更稳定的官方通道时，在 `.env` 配置 `TRANSLATION_GOOGLE_*` 或 `TRANSLATION_MICROSOFT_*`。需要本地模型精翻时配置 `TRANSLATION_LOCAL_BASE_URL` 和 `TRANSLATION_LOCAL_MODEL`，需要云端模型精翻时配置 `TRANSLATION_CLOUD_*`。没有翻译配置也不影响转录、原声保存和课后复习。

@@ -12,11 +12,11 @@ from flask_socketio import SocketIO
 from .config import AppConfig, load_config
 from .model_manager import ModelManager
 from .providers.factory import ProviderFactory
+from .providers.google_translation import GoogleTranslationProvider
+from .providers.microsoft_translation import MicrosoftTranslationProvider
 from .routes import LOCAL_MODELS, register_routes, register_socket_handlers
 from .session_manager import SessionManager
 from .translation import ModelTranslationProvider, TranslationRouter
-from .providers.google_translation import GoogleTranslationProvider
-from .providers.microsoft_translation import MicrosoftTranslationProvider
 
 socketio = SocketIO(async_mode="threading", cors_allowed_origins="*")
 
@@ -72,8 +72,6 @@ def _create_translation_router(config: AppConfig) -> TranslationRouter:
                 location=config.translation_google_location,
                 timeout_seconds=config.translation_timeout_seconds,
             )
-            if config.translation_google_configured
-            else None
         ),
         microsoft=(
             MicrosoftTranslationProvider(
@@ -83,6 +81,17 @@ def _create_translation_router(config: AppConfig) -> TranslationRouter:
                 timeout_seconds=config.translation_timeout_seconds,
             )
             if config.translation_microsoft_configured
+            else None
+        ),
+        local=(
+            ModelTranslationProvider(
+                name="local",
+                model=config.translation_local_model,
+                base_url=config.translation_local_base_url,
+                api_key=config.translation_local_api_key,
+                timeout_seconds=config.translation_timeout_seconds,
+            )
+            if config.translation_local_configured
             else None
         ),
         cloud=(

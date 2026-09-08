@@ -1,6 +1,8 @@
 import pytest
 
+from backend import create_app, socketio
 from backend.config import load_config
+from backend.models import TranscriptSegment
 from backend.providers.base import ProviderError
 from backend.translation import (
     GoogleTranslationProvider,
@@ -8,8 +10,6 @@ from backend.translation import (
     ModelTranslationProvider,
     TranslationRouter,
 )
-from backend import create_app, socketio
-from backend.models import TranscriptSegment
 
 
 class FakeResponse:
@@ -43,6 +43,21 @@ def test_google_provider_posts_ordered_contents_without_leaking_key(monkeypatch)
     assert captured["json"]["targetLanguageCode"] == "zh-CN"
     assert captured["headers"]["x-goog-api-key"] == "google-secret"
     assert "google-secret" not in str(provider.last_error if hasattr(provider, "last_error") else "")
+
+
+def test_google_provider_has_best_effort_public_fallback_without_key(monkeypatch):
+    captured = []
+
+    def fake_get(url, params, timeout):
+        captured.append({"url": url, "params": params, "timeout": timeout})
+        return FakeResponse(200, [[["你好", "Hello", None, None, 1]]])
+
+    monkeypatch.setattr("requests.get", fake_get)
+    provider = GoogleTranslationProvider("", "")
+
+    assert provider.translate_batch(["Hello"], "en", "zh") == ["你好"]
+    assert captured[0]["url"] == "https://translate.googleapis.com/translate_a/single"
+    assert captured[0]["params"] == {"client": "gtx", "sl": "en", "tl": "zh", "dt": "t", "q": "Hello"}
 
 
 def test_microsoft_provider_posts_translator_body_in_order(monkeypatch):
@@ -97,9 +112,56 @@ def test_translation_config_exposes_provider_flags_only():
 
     public = config.public_dict()
     assert public["translation"]["google"]["configured"] is True
+    assert public["translation"]["google"]["public_fallback"] is True
     assert public["translation"]["microsoft"]["configured"] is True
     assert public["translation"]["cloud_model"]["configured"] is True
     assert "secret" not in repr(public)
+
+
+def test_translation_config_supports_local_openai_compatible_model_without_key():
+    config = load_config({
+        "TRANSLATION_LOCAL_BASE_URL": "http://127.0.0.1:11434/v1",
+        "TRANSLATION_LOCAL_MODEL": "qwen2.5:3b",
+    })
+
+    public = config.public_dict()
+    assert config.translation_local_configured is True
+    assert public["translation"]["local_model"] == {
+        "configured": True,
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "qwen2.5:3b",
+    }
+
+
+def test_local_model_provider_uses_openai_compatible_endpoint_without_auth(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return FakeResponse(200, {"choices": [{"message": {"content": '["你好"]'}}]})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    provider = ModelTranslationProvider(
+        name="local",
+        model="qwen2.5:3b",
+        base_url="http://127.0.0.1:11434/v1",
+    )
+
+    assert provider.translate_batch(["Hello"], "en", "zh") == ["你好"]
+    assert captured["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert "Authorization" not in captured["headers"]
+
+
+def test_app_wires_configured_local_translation_provider():
+    app = create_app({
+        "TRANSLATION_LOCAL_BASE_URL": "http://127.0.0.1:11434/v1",
+        "TRANSLATION_LOCAL_MODEL": "qwen2.5:3b",
+    })
+
+    provider = app.extensions["translation_router"].providers["local"]
+    assert provider is not None
+    assert provider.name == "local"
+    assert provider.model == "qwen2.5:3b"
 
 
 def test_router_selects_fast_provider_and_auto_model_fallback():
