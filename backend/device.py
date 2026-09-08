@@ -1,3 +1,5 @@
+import platform
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
@@ -21,11 +23,17 @@ def _performance_for_memory(memory_gb: Optional[float]) -> str:
     return "fast"
 
 
+def _is_apple_silicon() -> bool:
+    return sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+
+
 @lru_cache(maxsize=1)
 def get_device_profile() -> DeviceProfile:
     try:
         import torch
     except ImportError:
+        if _is_apple_silicon():
+            return DeviceProfile("mps", "apple", None, "balanced")
         return DeviceProfile("cpu", "cpu", None, "unknown")
 
     if torch.cuda.is_available():
