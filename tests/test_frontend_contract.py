@@ -124,3 +124,17 @@ def test_pages_include_keyboard_and_mobile_safety_hooks():
     assert 'class="skip-link"' in review
     assert "safe-area-inset-bottom" in stylesheet
     assert 'aria-label="搜索课堂笔记"' in review
+
+
+def test_live_workbench_has_planned_control_groups_and_follow_feedback():
+    app = create_app({})
+    html = app.test_client().get("/").get_data(as_text=True)
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+    stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
+
+    for hook in ["setup-path-field", "setup-field-grid", "setup-translation-field", "autoscroll-state", "model-selection-summary", "model-speed", "model-quality"]:
+        assert hook in html
+    for hook in ["updateFollowUi", "is-auto-following", "is-pulsing"]:
+        assert hook in javascript
+    for hook in ["follow-pulse", "return-latest-in", "prefers-reduced-motion"]:
+        assert hook in stylesheet

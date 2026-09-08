@@ -10,12 +10,12 @@ from .providers.base import ProviderError
 from .providers.local_whisper import local_model_available
 
 LOCAL_MODELS = (
-    {"id": "distil-small.en", "label": "Distil Small EN", "size": "~336MB", "best_for": "英语课堂 · 轻薄本"},
-    {"id": "tiny", "label": "Tiny", "size": "~75MB", "best_for": "低配 CPU"},
-    {"id": "base", "label": "Base", "size": "~145MB", "best_for": "普通 CPU"},
-    {"id": "small", "label": "Small", "size": "~465MB", "best_for": "课堂均衡"},
-    {"id": "medium", "label": "Medium", "size": "~1.5GB", "best_for": "较高准确率"},
-    {"id": "large-v3-turbo", "label": "Large v3 Turbo", "size": "大模型", "best_for": "高性能 GPU"},
+    {"id": "distil-small.en", "label": "Distil Small EN", "size": "~336MB", "speed": "快", "quality": "好", "resource": "低", "languages": "英语", "best_for": "英语课堂 · 轻薄本"},
+    {"id": "tiny", "label": "Tiny", "size": "~75MB", "speed": "最快", "quality": "基础", "resource": "最低", "languages": "多语言", "best_for": "低配 CPU"},
+    {"id": "base", "label": "Base", "size": "~145MB", "speed": "快", "quality": "不错", "resource": "低", "languages": "多语言", "best_for": "普通 CPU"},
+    {"id": "small", "label": "Small", "size": "~465MB", "speed": "中等", "quality": "较好", "resource": "中", "languages": "多语言", "best_for": "课堂均衡"},
+    {"id": "medium", "label": "Medium", "size": "~1.5GB", "speed": "较慢", "quality": "更好", "resource": "高", "languages": "多语言", "best_for": "较高准确率"},
+    {"id": "large-v3-turbo", "label": "Large v3 Turbo", "size": "大模型", "speed": "GPU 快", "quality": "最高", "resource": "很高", "languages": "多语言", "best_for": "高性能 GPU"},
 )
 
 

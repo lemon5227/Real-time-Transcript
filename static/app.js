@@ -39,6 +39,7 @@
     capabilities: null,
     models: [],
     modelPollTimer: null,
+    followPulseTimer: null,
     mode: "auto",
     sessionId: null,
     provider: null,
@@ -215,6 +216,57 @@
     return state.models.find(function (model) { return model.id === modelSelect.value; }) || null;
   }
 
+  function pulseFollowControl() {
+    var control = $("#autoscroll-toggle").closest(".toggle-label");
+    if (!control) return;
+    control.classList.remove("is-pulsing");
+    window.requestAnimationFrame(function () {
+      control.classList.add("is-pulsing");
+      window.clearTimeout(state.followPulseTimer);
+      state.followPulseTimer = window.setTimeout(function () { control.classList.remove("is-pulsing"); }, 650);
+    });
+  }
+
+  function updateFollowUi() {
+    var toggle = $("#autoscroll-toggle");
+    var control = toggle.closest(".toggle-label");
+    var stateNode = $("#autoscroll-state");
+    if (!toggle || !control) return;
+    var enabled = toggle.checked;
+    control.classList.toggle("is-active", enabled);
+    control.setAttribute("aria-label", enabled ? "自动跟随已开启" : "自动跟随已关闭");
+    if (stateNode) stateNode.textContent = enabled ? "跟随中" : "已暂停";
+    feed.classList.toggle("is-auto-following", enabled);
+  }
+
+  function renderModelGuidance(model) {
+    var badge = $("#model-profile-badge");
+    var chip = $("#model-ready-chip");
+    var speed = $("#model-speed");
+    var quality = $("#model-quality");
+    var resource = $("#model-resource");
+    var summary = $("#model-selection-summary");
+    if (!badge || !chip || !speed || !quality || !resource || !summary) return;
+    if (!model) {
+      badge.textContent = "等待模型信息";
+      chip.textContent = "不可用";
+      speed.textContent = quality.textContent = resource.textContent = "—";
+      summary.textContent = "暂时无法读取模型目录；你仍可以检查后端连接。";
+      return;
+    }
+    var ready = model.status === "ready" || model.status === "runtime_download";
+    badge.textContent = state.mode === "cloud" ? "云端转录" : (model.best_for || model.languages || "本地模型");
+    chip.textContent = state.mode === "cloud" ? "由服务配置" : ready ? "已就绪" : model.status === "downloading" ? "下载中" : "未下载";
+    chip.classList.toggle("is-ready", ready || state.mode === "cloud");
+    chip.classList.toggle("is-warning", !ready && state.mode !== "cloud");
+    speed.textContent = state.mode === "cloud" ? "取决于网络" : (model.speed || "—");
+    quality.textContent = model.quality || "—";
+    resource.textContent = state.mode === "cloud" ? "本机低" : (model.resource || "—");
+    summary.textContent = state.mode === "cloud"
+      ? "云端路径不占用本机推理算力；实际延迟取决于网络和云端服务。"
+      : (model.languages || "多语言") + " · " + (model.size || "需要模型文件") + " · 适合：" + (model.best_for || "通用转录");
+  }
+
   function updateCapabilityUi(data) {
     state.capabilities = data;
     var device = data.local && data.local.device ? data.local.device : {};
@@ -350,6 +402,7 @@
     var button = $("#model-download-button");
     var status = model ? model.status : "pending";
     var cloudReady = state.mode === "cloud" && state.capabilities && state.capabilities.cloud && state.capabilities.cloud.configured;
+    renderModelGuidance(model);
     setRowState(row, cloudReady ? "ready" : status);
     statusNode.textContent = state.mode === "cloud" ? (cloudReady ? "云端服务已配置，可以开始" : "云端尚未配置，请改用本地或配置服务") : modelStatusText(model);
     button.hidden = state.mode === "cloud" || !model || !model.download_supported || model.status === "ready" || model.status === "dependency_missing";
@@ -437,7 +490,10 @@
     renderSegmentTranslation(article, segment);
     feed.appendChild(article);
     $("#segment-count").textContent = state.segments.length;
-    if ($("#autoscroll-toggle").checked) feed.scrollTop = feed.scrollHeight;
+    if ($("#autoscroll-toggle").checked) {
+      feed.scrollTop = feed.scrollHeight;
+      pulseFollowControl();
+    }
     scheduleSessionSave();
     enqueueTranslation(segment);
   }
@@ -1011,13 +1067,31 @@
   }
 
   function setupTranscriptFollow() {
+    var toggle = $("#autoscroll-toggle");
     feed.addEventListener("scroll", function () {
       var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24;
       returnLatest.hidden = atBottom;
-      if (!atBottom) $("#autoscroll-toggle").checked = false;
+      if (!atBottom && toggle.checked) {
+        toggle.checked = false;
+        updateFollowUi();
+      }
     });
-    returnLatest.addEventListener("click", function () { feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" }); $("#autoscroll-toggle").checked = true; returnLatest.hidden = true; });
-    $("#autoscroll-toggle").addEventListener("change", function () { if (this.checked) { feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" }); returnLatest.hidden = true; } });
+    returnLatest.addEventListener("click", function () {
+      toggle.checked = true;
+      updateFollowUi();
+      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+      returnLatest.hidden = true;
+      pulseFollowControl();
+    });
+    toggle.addEventListener("change", function () {
+      updateFollowUi();
+      if (this.checked) {
+        feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+        returnLatest.hidden = true;
+        pulseFollowControl();
+      }
+    });
+    updateFollowUi();
   }
 
   $("#model-download-button").addEventListener("click", downloadSelectedModel);

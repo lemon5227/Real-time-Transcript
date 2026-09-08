@@ -41,6 +41,13 @@ def test_models_endpoint_reports_readiness_fields():
     assert {"status", "dependency_available", "download_supported", "weights_available", "progress"}.issubset(model)
 
 
+def test_models_endpoint_exposes_selection_guidance():
+    app = create_app({})
+    models = app.test_client().get("/api/models").get_json()["models"]
+    model = models[0]
+    assert {"speed", "quality", "resource", "languages", "best_for"}.issubset(model)
+
+
 def test_model_download_endpoint_rejects_unknown_model():
     app = create_app({})
     response = app.test_client().post("/api/models/not-a-model/download")
