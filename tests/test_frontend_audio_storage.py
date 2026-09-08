@@ -60,11 +60,12 @@ vm.runInNewContext(fs.readFileSync('./static/storage.js', 'utf8'), context);
 const oldRecord = context.window.EchoStore.normalizeSession({id: 'old', segments: []});
 const newRecord = context.window.EchoStore.normalizeSession({
   id: 'new',
-  segments: [],
+  segments: [{id: 'segment-1', text: 'hello', translations: {zh: {text: '你好', status: 'ready', provider: 'google'}}}],
   audio: {enabled: true, status: 'ready', storage: 'opfs', mimeType: 'audio/webm', chunkCount: 2, bytes: 42, durationMs: 20000}
 });
 if (oldRecord.audio !== null) process.exit(1);
 if (!newRecord.audio || newRecord.audio.status !== 'ready' || newRecord.audio.chunkCount !== 2 || newRecord.audio.bytes !== 42) process.exit(2);
+if (!newRecord.segments[0].translations.zh || newRecord.segments[0].translations.zh.text !== '你好') process.exit(3);
 '''
     result = run_node(script)
     assert result.returncode == 0, result.stderr or result.stdout

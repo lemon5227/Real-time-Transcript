@@ -101,6 +101,15 @@
               <div class="field-block"><label class="field-label" for="language-select">讲课语言</label><select class="text-input select-input" id="language-select"><option value="en">English</option><option value="zh">中文</option><option value="auto">自动识别</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div>
             </div>
 
+            <div class="translation-settings" aria-labelledby="translation-settings-title">
+              <div class="field-block"><label class="field-label" id="translation-settings-title" for="translation-mode">实时翻译</label><select class="text-input select-input" id="translation-mode"><option value="off">关闭 · 节省资源</option><option value="fast">快速翻译 · Google / Microsoft</option><option value="precise">精确翻译 · 模型</option><option value="auto">自动选择精确模型</option></select></div>
+              <div class="field-grid translation-grid">
+                <div class="field-block"><label class="field-label" for="translation-provider">快速服务</label><select class="text-input select-input" id="translation-provider"><option value="google">Google Cloud</option><option value="microsoft">Microsoft Translator</option></select></div>
+                <div class="field-block"><label class="field-label" for="translation-target">目标语言</label><select class="text-input select-input" id="translation-target"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div>
+              </div>
+              <div class="translation-model-row"><label class="field-label" for="translation-model-mode">精确方式</label><select class="text-input select-input" id="translation-model-mode"><option value="auto">自动 · 本地优先</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select><small id="translation-status">实时翻译默认关闭；课后可再精确翻译</small></div>
+            </div>
+
             <div class="capability-panel" id="capability-panel" aria-live="polite">
               <div class="capability-icon" aria-hidden="true">✦</div>
               <div><strong id="capability-title">正在读取设备能力</strong><p id="capability-note">马上告诉你哪条路径最顺畅。</p></div>
@@ -148,6 +157,7 @@
     <script src="{{ url_for('static', filename='audio-storage.js') }}"></script>
     <script src="{{ url_for('static', filename='audio-buffer.js') }}"></script>
     <script src="{{ url_for('static', filename='audio-recorder.js') }}"></script>
+    <script src="{{ url_for('static', filename='translation-queue.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

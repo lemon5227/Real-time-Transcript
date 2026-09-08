@@ -62,6 +62,33 @@ def test_live_page_exposes_default_local_audio_save_controls():
     assert "createRecording" in storage
 
 
+def test_live_page_exposes_translation_controls_and_queue():
+    app = create_app({})
+    html = app.test_client().get("/").get_data(as_text=True)
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+    queue = app.test_client().get("/static/translation-queue.js").get_data(as_text=True)
+    for hook in ["translation-mode", "translation-provider", "translation-target", "translation-status"]:
+        assert hook in html
+    for hook in ["EchoTranslationQueue", "translation_result", "实时翻译", "翻译失败"]:
+        assert hook in javascript
+    assert "batchSize" in queue
+
+
+def test_review_page_exposes_audio_playback_hooks():
+    app = create_app({})
+    html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    for hook in ["reviewAudio", "reviewAudioStatus", "export-audio"]:
+        assert hook in html
+    for hook in ["getPlayableBlob", "currentTime", "timeupdate", "revokeObjectURL"]:
+        assert hook in javascript
+
+
+def test_translation_queue_is_loaded_by_live_page():
+    html = create_app({}).test_client().get("/").get_data(as_text=True)
+    assert "/static/translation-queue.js" in html
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript

@@ -42,6 +42,19 @@
   }
 
   function normalizeSegment(segment, index) {
+    var translations = {};
+    Object.keys(segment && segment.translations || {}).forEach(function (language) {
+      var translation = segment.translations[language] || {};
+      translations[String(language)] = {
+        text: String(translation.text || "").trim(),
+        status: ["ready", "pending", "failed"].indexOf(translation.status) !== -1 ? translation.status : "ready",
+        mode: String(translation.mode || "fast"),
+        provider: String(translation.provider || ""),
+        model: translation.model ? String(translation.model) : "",
+        updatedAt: translation.updatedAt || null,
+        error: String(translation.error || "")
+      };
+    });
     return {
       id: segment.id || "segment-" + index,
       text: String(segment.text || "").trim(),
@@ -49,7 +62,8 @@
       endMs: Number(segment.endMs !== undefined ? segment.endMs : segment.end_ms) || 0,
       note: String(segment.note || ""),
       starred: Boolean(segment.starred),
-      isFinal: segment.isFinal !== undefined ? Boolean(segment.isFinal) : segment.is_final !== false
+      isFinal: segment.isFinal !== undefined ? Boolean(segment.isFinal) : segment.is_final !== false,
+      translations: translations
     };
   }
 

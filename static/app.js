@@ -13,6 +13,10 @@
   var startLabel = $("#start-listening-label");
   var modelSelect = $("#model-select");
   var microphoneSelect = $("#microphone-select");
+  var translationModeSelect = $("#translation-mode");
+  var translationProviderSelect = $("#translation-provider");
+  var translationTargetSelect = $("#translation-target");
+  var translationModelModeSelect = $("#translation-model-mode");
   var SETTINGS_KEY = "echonote-preferences-v1";
   var state = {
     recording: false,
@@ -46,6 +50,12 @@
     audioRecorder: null,
     audioManifest: null,
     audioStopPromise: null,
+    translationStopPromise: null,
+    translationQueue: null,
+    translationMode: "off",
+    translationProvider: "google",
+    translationTarget: "zh",
+    translationModelMode: "auto",
     stopResult: null,
     finalizing: false,
     micTestStream: null,
@@ -167,7 +177,11 @@
         language: $("#language-select").value,
         courseTitle: $("#course-title").value.trim(),
         deviceId: state.selectedDeviceId,
-        saveAudio: state.saveAudio
+        saveAudio: state.saveAudio,
+        translationMode: state.translationMode,
+        translationProvider: state.translationProvider,
+        translationTarget: state.translationTarget,
+        translationModelMode: state.translationModelMode
       }));
     } catch (_error) { /* localStorage is optional */ }
   }
@@ -180,6 +194,14 @@
     if (saved.courseTitle) $("#course-title").value = saved.courseTitle;
     state.saveAudio = saved.saveAudio !== false;
     $("#save-audio").checked = state.saveAudio;
+    if (["off", "fast", "precise", "auto"].indexOf(saved.translationMode) !== -1) state.translationMode = saved.translationMode;
+    if (["google", "microsoft"].indexOf(saved.translationProvider) !== -1) state.translationProvider = saved.translationProvider;
+    if (saved.translationTarget && translationTargetSelect.querySelector('[value="' + saved.translationTarget + '"]')) state.translationTarget = saved.translationTarget;
+    if (["auto", "local", "cloud"].indexOf(saved.translationModelMode) !== -1) state.translationModelMode = saved.translationModelMode;
+    translationModeSelect.value = state.translationMode;
+    translationProviderSelect.value = state.translationProvider;
+    translationTargetSelect.value = state.translationTarget;
+    translationModelModeSelect.value = state.translationModelMode;
     state.selectedDeviceId = saved.deviceId || "";
     $$(".mode-option").forEach(function (option) {
       var selected = option.dataset.mode === state.mode;
@@ -208,7 +230,32 @@
     $("#capability-note").textContent = note;
     $("#model-status").textContent = localAvailable ? "本地能力已检查" : cloudAvailable ? "云端能力已检查" : "等待模型配置";
     $("#capability-panel").classList.toggle("is-warning", !localAvailable && !cloudAvailable);
+    updateTranslationUi();
     renderReadiness();
+  }
+
+  function translationCapability(provider) {
+    var translation = state.capabilities && state.capabilities.translation;
+    return translation && translation[provider] ? translation[provider] : { configured: false };
+  }
+
+  function translationReady() {
+    if (state.translationMode === "off") return true;
+    if (state.translationMode === "fast") return translationCapability(state.translationProvider).configured;
+    var cloud = state.capabilities && state.capabilities.translation && state.capabilities.translation.cloud_model;
+    return state.translationModelMode === "cloud" || state.translationModelMode === "auto" || state.translationMode === "auto"
+      ? Boolean(cloud && cloud.configured)
+      : false;
+  }
+
+  function updateTranslationUi() {
+    var node = $("#translation-status");
+    if (!node) return;
+    var mode = state.translationMode;
+    var provider = mode === "fast" ? state.translationProvider === "microsoft" ? "Microsoft 快速翻译" : "Google 快速翻译" : mode === "off" ? "实时翻译默认关闭；课后可以再翻译" : state.translationModelMode === "local" ? "本地精确翻译" : "精确翻译会使用可用的模型服务";
+    var ready = translationReady();
+    node.textContent = ready ? provider + " · 目标：" + (translationTargetSelect.options[translationTargetSelect.selectedIndex] ? translationTargetSelect.options[translationTargetSelect.selectedIndex].textContent : "中文") : provider + "尚未配置，课堂仍可只做原文转录";
+    node.classList.toggle("is-warning", !ready && mode !== "off");
   }
 
   function loadCapabilities() {
@@ -366,6 +413,7 @@
     state.segments.push(segment);
     var article = document.createElement("article");
     article.className = "transcript-segment";
+    article.dataset.segmentId = String(segment.id || segment.segment_id || "");
     var time = document.createElement("time");
     time.className = "segment-time";
     time.textContent = formatDuration(Math.max(0, Number(segment.start_ms || 0) / 1000));
@@ -380,10 +428,123 @@
     content.appendChild(meta);
     article.appendChild(time);
     article.appendChild(content);
+    renderSegmentTranslation(article, segment);
     feed.appendChild(article);
     $("#segment-count").textContent = state.segments.length;
     if ($("#autoscroll-toggle").checked) feed.scrollTop = feed.scrollHeight;
     scheduleSessionSave();
+    enqueueTranslation(segment);
+  }
+
+  function segmentTranslation(segment) {
+    var translations = segment && segment.translations;
+    return translations && translations[state.translationTarget] ? translations[state.translationTarget] : null;
+  }
+
+  function renderSegmentTranslation(article, segment) {
+    var existing = article.querySelector(".translation-line");
+    if (existing) existing.remove();
+    var translation = segmentTranslation(segment);
+    if (!translation) return;
+    var line = document.createElement("p");
+    line.className = "translation-line" + (translation.status === "pending" ? " is-pending" : translation.status === "failed" ? " is-failed" : "");
+    line.textContent = translation.status === "pending" ? "翻译中…" : translation.status === "failed" ? "翻译失败 · 可重试" : translation.text || "";
+    if (translation.status === "failed") {
+      line.tabIndex = 0;
+      line.setAttribute("role", "button");
+      line.title = "点击重试翻译";
+      line.addEventListener("click", function () { retryTranslation(segment); });
+      line.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); retryTranslation(segment); } });
+    }
+    article.querySelector(".segment-content").insertBefore(line, article.querySelector(".segment-content").firstChild);
+  }
+
+  function findSegment(id) {
+    return state.segments.find(function (segment) { return String(segment.id || segment.segment_id || "") === String(id); }) || null;
+  }
+
+  function applyTranslationResult(result) {
+    (result && result.translations || []).forEach(function (item) {
+      var segment = findSegment(item.segment_id || item.id);
+      if (!segment) return;
+      segment.translations = segment.translations || {};
+      segment.translations[item.target_language || state.translationTarget] = item;
+      $$(".transcript-segment").forEach(function (article) {
+        if (article.dataset.segmentId === String(item.segment_id || item.id)) renderSegmentTranslation(article, segment);
+      });
+    });
+    if (result && result.translations && result.translations.length) {
+      setTranslationStatus((result.provider || "翻译服务") + "已完成", false);
+      scheduleSessionSave();
+    }
+  }
+
+  function setTranslationStatus(message, warning) {
+    var node = $("#translation-status");
+    if (!node) return;
+    node.textContent = message;
+    node.classList.toggle("is-warning", Boolean(warning));
+  }
+
+  function enqueueTranslation(segment) {
+    if (!state.translationQueue || state.translationMode === "off" || !segment || segment.is_final === false || segment.isFinal === false) return;
+    var id = String(segment.id || segment.segment_id || "");
+    var record = findSegment(id);
+    if (record) {
+      record.translations = record.translations || {};
+      record.translations[state.translationTarget] = { status: "pending", mode: state.translationMode === "fast" ? "fast" : "model", provider: state.translationProvider, text: "" };
+      $$(".transcript-segment").forEach(function (candidate) {
+        if (candidate.dataset.segmentId === id) renderSegmentTranslation(candidate, record);
+      });
+    }
+    state.translationQueue.enqueue(segment);
+  }
+
+  function retryTranslation(segment) {
+    if (!state.translationQueue || !segment) return;
+    setTranslationStatus("正在重试翻译…", false);
+    state.translationQueue.retry([segment]);
+  }
+
+  function createTranslationQueue() {
+    if (!window.EchoTranslationQueue) return;
+    state.translationQueue = window.EchoTranslationQueue.create({
+      batchSize: 5,
+      maxChars: 3000,
+      send: function (items) {
+        if (!state.socket || !state.connected) return Promise.reject(new Error("实时连接已断开"));
+        return new Promise(function (resolve, reject) {
+          state.socket.emit("translate_segments", {
+            segment_ids: items.map(function (item) { return item.id; }),
+            source_language: state.language,
+            target_language: state.translationTarget,
+            mode: state.translationMode === "fast" ? "fast" : state.translationMode === "precise" ? "model" : state.translationMode,
+            provider: state.translationMode === "fast" ? state.translationProvider : state.translationModelMode,
+            local_ready: false
+          }, function (result) {
+            if (!result || result.status !== "success") {
+              var error = new Error(result && result.error ? result.error.message : "翻译失败");
+              error.code = result && result.error ? result.error.code : "TRANSLATION_FAILED";
+              reject(error);
+              return;
+            }
+            resolve(result);
+          });
+        });
+      },
+      onResult: applyTranslationResult,
+      onError: function (error, items) {
+        (items || []).forEach(function (item) {
+          var segment = findSegment(item.id);
+          if (!segment) return;
+          segment.translations = segment.translations || {};
+          segment.translations[state.translationTarget] = { status: "failed", mode: state.translationMode === "fast" ? "fast" : "model", provider: state.translationProvider, text: "", error: error.message || "翻译失败" };
+          $$(".transcript-segment").forEach(function (article) { if (article.dataset.segmentId === item.id) renderSegmentTranslation(article, segment); });
+        });
+        setTranslationStatus("翻译失败 · 原文仍然可用", true);
+        scheduleSessionSave();
+      }
+    });
   }
 
   function clearTranscript() {
@@ -621,6 +782,7 @@
       state.finishing = false;
       state.finalizing = false;
       state.audioStopPromise = null;
+      state.translationStopPromise = null;
       state.stopResult = null;
       var audioMessage = !state.saveAudio ? "字幕已保存" : audioManifest && audioManifest.status === "ready" ? "字幕和原声已保存" : audioManifest ? "字幕已保存，原声部分保存" : "字幕已保存，原声未保存";
       setAppPhase("saved", "本次听课已保存", audioMessage + " · 可以前往课后复习");
@@ -633,7 +795,9 @@
     if (!state.finishing || state.stopResult) return;
     state.stopResult = result || {};
     if (!state.audioStopPromise) state.audioStopPromise = Promise.resolve(null);
-    Promise.resolve(state.audioStopPromise).then(function (audioManifest) {
+    if (!state.translationStopPromise) state.translationStopPromise = Promise.resolve();
+    Promise.all([state.audioStopPromise, state.translationStopPromise]).then(function (values) {
+      var audioManifest = values[0];
       return completeSession(state.stopResult, audioManifest);
     });
   }
@@ -658,6 +822,7 @@
       return showError("模型还没有准备好", model ? modelStatusText(model) : "请选择一个可用模型", "download-model", "MODEL_NOT_READY");
     }
     if (state.saveAudio && !(await checkAudioReadiness())) return showError("原声保存不可用", "请关闭“保存原声”后仅保存字幕，或检查浏览器存储权限", "disable-audio", "AUDIO_STORAGE_UNAVAILABLE");
+    if (!translationReady()) return showError("翻译服务未就绪", $("#translation-status").textContent, "", "TRANSLATION_NOT_CONFIGURED");
     state.starting = true;
     hideError();
     stopMicTest();
@@ -695,6 +860,7 @@
         state.language = payload.language;
         state.audioRecorder = null;
         state.audioManifest = null;
+        if (state.translationQueue) state.translationQueue.start();
         $("#model-status").textContent = (result.provider || "provider") + (result.model ? " · " + result.model : "");
         try {
           await beginCapture();
@@ -729,6 +895,7 @@
     state.finishing = true;
     state.finalizing = false;
     state.stopResult = null;
+    state.translationStopPromise = state.translationQueue ? state.translationQueue.stop() : Promise.resolve();
     setAppPhase("stopping", "正在保存课堂", "正在处理最后一小段音频");
     flushPendingAudio();
     state.audioStopPromise = state.audioRecorder ? state.audioRecorder.stop().catch(function (caught) {
@@ -764,6 +931,26 @@
     checkAudioReadiness();
   }
 
+  function setupTranslation() {
+    [translationModeSelect, translationProviderSelect, translationTargetSelect, translationModelModeSelect].forEach(function (select) {
+      select.addEventListener("change", function () {
+        if (state.recording) {
+          select.value = select === translationModeSelect ? state.translationMode : select === translationProviderSelect ? state.translationProvider : select === translationTargetSelect ? state.translationTarget : state.translationModelMode;
+          return;
+        }
+        state.translationMode = translationModeSelect.value;
+        state.translationProvider = translationProviderSelect.value;
+        state.translationTarget = translationTargetSelect.value;
+        state.translationModelMode = translationModelModeSelect.value;
+        savePreferences();
+        updateTranslationUi();
+        renderReadiness();
+      });
+    });
+    createTranslationQueue();
+    updateTranslationUi();
+  }
+
   function setupModes() {
     $$(".mode-option").forEach(function (button) {
       button.addEventListener("click", function () {
@@ -796,6 +983,8 @@
     state.socket.on("connect", function () { state.connected = true; if (!state.recording && !state.starting) setAppPhase("idle", "实时连接已就绪", $("#model-status").textContent); renderReadiness(); });
     state.socket.on("disconnect", function () { state.connected = false; renderReadiness(); if (state.recording) showError("实时连接中断", "请先结束当前会话；网络恢复后可以重新开始", "retry-connection", "SOCKET_DISCONNECTED"); else setAppPhase("error", "实时连接已断开", "请检查后端服务"); });
     state.socket.on("transcript_segment", addSegment);
+    state.socket.on("translation_result", applyTranslationResult);
+    state.socket.on("translation_error", function (error) { setTranslationStatus("翻译失败 · 原文仍然可用", true); });
     state.socket.on("transcription_error", function (error) { showError(error.message || "转录出现问题", error.action, "", error.code); });
     state.socket.on("transcription_stopped", function (result) { if (state.recording || state.finishing) receiveStopResult(result); });
   }
@@ -834,6 +1023,7 @@
   restorePreferences();
   setupModes();
   setupAudioSave();
+  setupTranslation();
   updatePrivacyCopy();
   setupMicrophone();
   setupHelp();
