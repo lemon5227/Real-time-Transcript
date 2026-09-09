@@ -9,7 +9,7 @@ from .models import SessionConfig
 from .providers.base import ProviderError
 
 LOCAL_MODELS = (
-    {"id": "parakeet-tdt-0.6b-v3", "label": "Parakeet TDT v3 · Mac MLX", "model_ref": "mlx-community/parakeet-tdt-0.6b-v3", "runtime": "mlx", "size": "~1.2GB", "speed": "最快", "quality": "很好", "resource": "中", "languages": "英语 / 24 种欧洲语言", "best_for": "Apple Silicon · 英语课堂"},
+    {"id": "parakeet-tdt-0.6b-v3", "label": "Parakeet TDT v3 · Mac MLX", "model_ref": "mlx-community/parakeet-tdt-0.6b-v3", "runtime": "mlx", "size": "~2.5GB", "speed": "最快", "quality": "很好", "resource": "中", "languages": "英语 / 24 种欧洲语言", "best_for": "Apple Silicon · 英语课堂"},
     {"id": "distil-small.en", "label": "Distil Small EN", "model_ref": "distil-small.en", "runtime": "standard", "size": "~336MB", "speed": "快", "quality": "好", "resource": "低", "languages": "英语", "best_for": "英语课堂 · 普通 CPU"},
     {"id": "tiny", "label": "Tiny", "model_ref": "tiny", "runtime": "standard", "size": "~75MB", "speed": "最快", "quality": "基础", "resource": "最低", "languages": "多语言", "best_for": "低配 CPU"},
     {"id": "base", "label": "Base", "model_ref": "base", "runtime": "standard", "size": "~145MB", "speed": "快", "quality": "不错", "resource": "低", "languages": "多语言", "best_for": "普通 CPU"},
@@ -223,7 +223,7 @@ def register_socket_handlers(socketio: SocketIO) -> None:
             result = error_result(exc)
             socketio.emit("transcription_error", result["error"], to=flask_request.sid)
             return result
-        socketio.emit("transcription_started", result, to=flask_request.sid)
+        socketio.emit("transcription_session_created", result, to=flask_request.sid)
         return result
 
     @socketio.on("audio_chunk")

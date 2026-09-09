@@ -28,12 +28,14 @@ class _SessionState:
     session_id: str
     config: SessionConfig
     provider: TranscriptionProvider
-    audio_buffer: AudioWindowBuffer
+    audio_buffer: Optional[AudioWindowBuffer]
     merger: SegmentMerger
     audio_queue: queue.Queue
     stop_event: threading.Event = field(default_factory=threading.Event)
     finished_event: threading.Event = field(default_factory=threading.Event)
     worker: Optional[threading.Thread] = None
+    startup_event: threading.Event = field(default_factory=threading.Event)
+    startup_error: Optional[Exception] = None
     last_sequence: int = -1
     error: Optional[ProviderError] = None
 
@@ -44,10 +46,14 @@ class SessionManager:
         provider_factory: ProviderFactoryType,
         emit: Optional[EmitCallback] = None,
         max_payload_bytes: int = 2_000_000,
+        startup_timeout_seconds: float = 45.0,
     ):
+        if startup_timeout_seconds <= 0:
+            raise ValueError("startup_timeout_seconds must be positive")
         self._provider_factory = provider_factory
         self._emit = emit or (lambda _sid, _event, _payload: None)
         self._max_payload_bytes = max_payload_bytes
+        self._startup_timeout_seconds = startup_timeout_seconds
         self._sessions: Dict[str, _SessionState] = {}
         self._lock = threading.RLock()
 
@@ -57,20 +63,12 @@ class SessionManager:
                 raise ValueError("SESSION_ALREADY_ACTIVE: this connection already has a session")
 
             provider = self._make_provider(config)
-            provider.start(config)
             state = _SessionState(
                 sid=sid,
                 session_id="session-" + uuid.uuid4().hex,
                 config=config,
                 provider=provider,
-                audio_buffer=AudioWindowBuffer(
-                    window_seconds=config.window_seconds,
-                    overlap_seconds=(
-                        0.0
-                        if getattr(provider, "requires_contiguous_audio", False)
-                        else config.overlap_seconds
-                    ),
-                ),
+                audio_buffer=None,
                 merger=SegmentMerger(),
                 audio_queue=queue.Queue(maxsize=config.max_queue),
             )
@@ -83,7 +81,8 @@ class SessionManager:
             self._sessions[sid] = state
             state.worker.start()
             return {
-                "status": "success",
+                "status": "starting",
+                "ready": False,
                 "session_id": state.session_id,
                 "provider": getattr(provider, "name", "unknown"),
                 "model": getattr(provider, "model", None),
@@ -182,6 +181,29 @@ class SessionManager:
 
     def _run_worker(self, state: _SessionState) -> None:
         try:
+            # MLX streams are thread-affine. Keep provider startup, inference,
+            # flush, and close on this same worker thread.
+            state.provider.start(state.config)
+            state.audio_buffer = AudioWindowBuffer(
+                window_seconds=state.config.window_seconds,
+                overlap_seconds=(
+                    0.0
+                    if getattr(state.provider, "requires_contiguous_audio", False)
+                    else state.config.overlap_seconds
+                ),
+            )
+            state.startup_event.set()
+            self._emit(
+                state.sid,
+                "transcription_ready",
+                {
+                    "status": "ready",
+                    "ready": True,
+                    "session_id": state.session_id,
+                    "provider": getattr(state.provider, "name", "unknown"),
+                    "model": getattr(state.provider, "model", None),
+                },
+            )
             while True:
                 try:
                     item = state.audio_queue.get(timeout=0.2)
@@ -200,9 +222,30 @@ class SessionManager:
             for segment in state.provider.flush():
                 self._emit_segments(state, [segment], 0)
         except ProviderError as exc:
-            state.error = exc
-            self._emit(state.sid, "transcription_error", exc.to_dict())
+            if not state.startup_event.is_set():
+                state.startup_error = exc
+                state.error = exc
+                state.startup_event.set()
+                self._emit(state.sid, "transcription_error", exc.to_dict())
+            else:
+                state.error = exc
+                self._emit(state.sid, "transcription_error", exc.to_dict())
         except Exception as exc:
+            if not state.startup_event.is_set():
+                state.startup_error = ProviderError(
+                    "PROVIDER_START_FAILED",
+                    "实时转录 provider 启动失败",
+                    "检查模型依赖或切换到云端",
+                )
+                state.error = state.startup_error
+                state.startup_event.set()
+                self._emit(state.sid, "transcription_error", {
+                    "code": state.error.code,
+                    "message": state.error.message,
+                    "action": state.error.action,
+                    "detail": str(exc),
+                })
+                return
             state.error = ProviderError(
                 "SESSION_WORKER_FAILED",
                 "实时转录工作线程失败",
@@ -222,7 +265,12 @@ class SessionManager:
 
     def _process_window(self, state: _SessionState, window: AudioWindow) -> None:
         segments = state.provider.push(window.audio)
-        self._emit_segments(state, segments, window.start_ms)
+        # Stateful providers such as Parakeet already maintain a continuous
+        # timeline. Windowed providers return offsets relative to this window.
+        window_origin_ms = (
+            0 if getattr(state.provider, "requires_contiguous_audio", False) else window.start_ms
+        )
+        self._emit_segments(state, segments, window_origin_ms)
 
     def _emit_segments(
         self,
@@ -230,5 +278,19 @@ class SessionManager:
         segments: List[TranscriptSegment],
         window_start_ms: int,
     ) -> None:
-        for segment in state.merger.add(segments, window_start_ms):
+        final_segments = [segment for segment in segments if segment.is_final]
+        for segment in state.merger.add(final_segments, window_start_ms):
             self._emit(state.sid, "transcript_segment", segment.to_dict())
+        for segment in segments:
+            if segment.is_final:
+                continue
+            candidate = TranscriptSegment(
+                id=segment.id,
+                text=segment.text.strip(),
+                start_ms=segment.start_ms + window_start_ms,
+                end_ms=segment.end_ms + window_start_ms,
+                is_final=False,
+                confidence=segment.confidence,
+            )
+            if candidate.text:
+                self._emit(state.sid, "transcript_segment", candidate.to_dict())
