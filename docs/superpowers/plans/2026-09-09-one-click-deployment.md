@@ -173,7 +173,7 @@ git commit -m "feat: add cross-platform native quickstart"
 
 **Interfaces:**
 - `docker compose up --build` runs the cloud image on host port `5001`.
-- `TRANSCRIPT_DOCKERFILE=Dockerfile.local TRANSCRIPTION_MODE=local docker compose up --build` runs the explicit standard local CPU image.
+- `TRANSCRIPT_DOCKERFILE=Dockerfile.local DOCKER_TRANSCRIPTION_MODE=local docker compose up --build` runs the explicit standard local CPU image.
 - Both images expose the same Flask app and `/api/health` endpoint.
 
 - [ ] **Step 1: Write Docker contract tests**
@@ -221,7 +221,7 @@ Use a shell form only for `${PORT:-5001}` expansion. Do not copy `.env`, `save/`
 
 - [ ] **Step 4: Implement the explicit local CPU Dockerfile**
 
-Use the same base image and production command, but install `requirements-local.txt`. Set no GPU claims or default mode in the image; Compose supplies `TRANSCRIPTION_MODE=local`. Document that this image is CPU-oriented and that native execution is recommended for MLX or CUDA.
+Use the same base image and production command, but install `requirements-local.txt`. Set no GPU claims or default mode in the image; Compose supplies `TRANSCRIPTION_MODE=local` from its Docker-only override variable. Document that this image is CPU-oriented and that native execution is recommended for MLX or CUDA.
 
 - [ ] **Step 5: Implement the Docker build context exclusions**
 
@@ -229,11 +229,11 @@ Exclude `.env`, `.git/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `models/`, 
 
 - [ ] **Step 6: Implement the default Compose service**
 
-Use `TRANSCRIPT_DOCKERFILE` with default `Dockerfile`, `TRANSCRIPT_PORT` with default `5001`, and `TRANSCRIPTION_MODE` with default `cloud`. Inject `.env` at runtime with optional-file semantics, set `HOST=0.0.0.0` and container `PORT=5001`, map `${TRANSCRIPT_PORT:-5001}:5001`, and use `restart: unless-stopped`. Do not mount model or save directories by default.
+Use `TRANSCRIPT_DOCKERFILE` with default `Dockerfile`, `TRANSCRIPT_PORT` with default `5001`, and `DOCKER_TRANSCRIPTION_MODE` with default `cloud`. Inject `.env` at runtime with optional-file semantics, set `HOST=0.0.0.0`, container `PORT=5001`, and `TRANSCRIPTION_MODE=${DOCKER_TRANSCRIPTION_MODE:-cloud}`, map `${TRANSCRIPT_PORT:-5001}:5001`, and use `restart: unless-stopped`. Do not mount model or save directories by default.
 
 - [ ] **Step 7: Add local Docker instructions to contract tests**
 
-Assert that `docker-compose.yml` contains `TRANSCRIPT_DOCKERFILE`, `TRANSCRIPT_PORT`, `HOST: 0.0.0.0`, and the cloud default. Add a test that the README command uses `Dockerfile.local` and `TRANSCRIPTION_MODE=local` for the explicit local path.
+Assert that `docker-compose.yml` contains `TRANSCRIPT_DOCKERFILE`, `TRANSCRIPT_PORT`, `HOST: 0.0.0.0`, and the cloud default. Add a test that the README command uses `Dockerfile.local` and `DOCKER_TRANSCRIPTION_MODE=local` for the explicit local path.
 
 - [ ] **Step 8: Run static and Docker validation**
 
