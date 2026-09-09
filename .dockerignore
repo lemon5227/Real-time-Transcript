@@ -1,0 +1,15 @@
+.env
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+models/
+.cache/
+transformers_cache/
+save/
+*.log
+server.log
+docs/superpowers/
+tests/

@@ -1,0 +1,15 @@
+services:
+  transcript:
+    build:
+      context: .
+      dockerfile: ${TRANSCRIPT_DOCKERFILE:-Dockerfile}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "5001"
+      TRANSCRIPTION_MODE: ${DOCKER_TRANSCRIPTION_MODE:-cloud}
+    ports:
+      - "${TRANSCRIPT_PORT:-5001}:5001"
+    restart: unless-stopped
