@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from typing import List, Sequence
 from urllib.parse import quote
 
@@ -99,13 +102,16 @@ class GoogleTranslationProvider:
                     },
                     timeout=self.timeout_seconds,
                 )
+                if response.status_code == 429 and self._http is None:
+                    translated = self._translate_public_with_curl(
+                        value, source_language, target_language
+                    )
+                    result.append(translated)
+                    continue
                 if response.status_code >= 400:
                     raise map_translation_response_error(response.status_code)
                 payload = response.json()
-                chunks = payload[0]
-                translated = "".join(
-                    str(chunk[0]) for chunk in chunks if isinstance(chunk, list) and chunk
-                ).strip()
+                translated = self._parse_public_translation(payload)
                 if not translated:
                     raise ProviderError("TRANSLATION_INVALID_RESPONSE", "Google 公共翻译返回空结果")
                 result.append(translated)
@@ -120,3 +126,56 @@ class GoogleTranslationProvider:
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ProviderError("TRANSLATION_INVALID_RESPONSE", "Google 公共翻译返回格式无效") from exc
         return result
+
+    def _translate_public_with_curl(
+        self, value: str, source_language: str, target_language: str
+    ) -> str:
+        curl = shutil.which("curl")
+        if not curl:
+            raise map_translation_response_error(429)
+        command = [
+            curl,
+            "--silent",
+            "--show-error",
+            "--http2",
+            "--get",
+            "--max-time",
+            str(max(1, self.timeout_seconds)),
+            "https://translate.googleapis.com/translate_a/single",
+            "--data-urlencode",
+            "client=gtx",
+            "--data-urlencode",
+            "sl=" + source_language,
+            "--data-urlencode",
+            "tl=" + target_language,
+            "--data-urlencode",
+            "dt=t",
+            "--data-urlencode",
+            "q=" + value,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds + 1,
+                check=False,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError("TRANSLATION_TIMEOUT", "Google 公共翻译请求超时", "稍后重试或配置官方 API") from exc
+        except OSError as exc:
+            raise ProviderError("TRANSLATION_NETWORK_ERROR", "无法连接 Google 公共翻译", "检查网络或配置其他翻译服务") from exc
+        if completed.returncode != 0:
+            raise map_translation_response_error(429)
+        try:
+            return self._parse_public_translation(json.loads(completed.stdout))
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ProviderError("TRANSLATION_INVALID_RESPONSE", "Google 公共翻译返回格式无效") from exc
+
+    @staticmethod
+    def _parse_public_translation(payload: object) -> str:
+        chunks = payload[0]  # type: ignore[index]
+        return "".join(
+            str(chunk[0]) for chunk in chunks if isinstance(chunk, list) and chunk
+        ).strip()

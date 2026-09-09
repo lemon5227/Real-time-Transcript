@@ -51,6 +51,8 @@ def mlx_runtime_available() -> bool:
 class MlxParakeetProvider:
     name = "mlx"
     requires_contiguous_audio = True
+    max_words_per_segment = 24
+    max_words_in_current_draft = 32
 
     def __init__(
         self,
@@ -66,10 +68,20 @@ class MlxParakeetProvider:
         self._audio_samples = 0
         self._segment_number = 0
         self._emitted: Set[Tuple[int, int, str]] = set()
+        self._finalized_token_count = 0
+        self._pending_final_tokens: List[object] = []
+        self._timeline_cursor_ms = 0
         self._last_draft = ""
 
     def start(self, config: SessionConfig) -> None:
         self._config = config
+        self._audio_samples = 0
+        self._segment_number = 0
+        self._emitted.clear()
+        self._finalized_token_count = 0
+        self._pending_final_tokens = []
+        self._timeline_cursor_ms = 0
+        self._last_draft = ""
         if config.language not in PARAKEET_LANGUAGES and config.language != "auto":
             raise ProviderError(
                 "MLX_LANGUAGE_UNSUPPORTED",
@@ -88,7 +100,10 @@ class MlxParakeetProvider:
             if self._model is None:
                 raise ImportError("parakeet_mlx returned no model")
             stream = self._model.transcribe_stream(
-                context_size=(256, 256),
+                # Keep a generous left context for lecture terminology while
+                # reducing the right context so confirmed text arrives in a
+                # useful time for live classes.
+                context_size=(256, 64),
                 keep_original_attention=False,
             )
             self._stream = stream.__enter__()
@@ -107,7 +122,6 @@ class MlxParakeetProvider:
         chunk = np.asarray(audio, dtype=np.float32).reshape(-1)
         if not chunk.size:
             return []
-        window_start_ms = round(self._audio_samples * 1000 / 16000)
         try:
             runtime_audio = self._audio_converter(chunk) if self._audio_converter else chunk
             self._stream.add_audio(runtime_audio)
@@ -120,7 +134,10 @@ class MlxParakeetProvider:
                 "降低系统负载、检查 requirements-mac.txt，或切换到云端",
             ) from exc
 
-        segments = self._new_sentence_segments(result, window_start_ms)
+        if self._uses_token_stability_protocol():
+            return self._push_stable_stream(chunk)
+
+        segments = self._new_sentence_segments(result)
         draft = self._draft_text(result)
         if draft and draft != self._last_draft:
             self._last_draft = draft
@@ -135,7 +152,134 @@ class MlxParakeetProvider:
             )
         return segments
 
-    def _new_sentence_segments(self, result: object, window_start_ms: int) -> List[TranscriptSegment]:
+    def _uses_token_stability_protocol(self) -> bool:
+        return self._stream is not None and all(
+            hasattr(self._stream, attribute)
+            for attribute in ("finalized_tokens", "draft_tokens")
+        )
+
+    def _push_stable_stream(self, chunk: np.ndarray) -> List[TranscriptSegment]:
+        # result.sentences is a rolling hypothesis whose text and timestamps
+        # can be rewritten on every add_audio call. Only finalized_tokens are
+        # safe to commit to the historical transcript.
+        self._collect_new_finalized_tokens()
+        completed, self._pending_final_tokens = self._split_completed_sentences(
+            self._pending_final_tokens
+        )
+        output = self._segments_from_token_groups(completed)
+
+        draft_tokens = list(getattr(self._stream, "draft_tokens", None) or [])
+        draft = self._tokens_text(self._pending_final_tokens + draft_tokens)
+        draft = self._bounded_draft_text(draft)
+        if draft:
+            if draft != self._last_draft:
+                self._last_draft = draft
+                output.append(
+                    TranscriptSegment(
+                        id="mlx-draft",
+                        text=draft,
+                        start_ms=self._timeline_cursor_ms,
+                        end_ms=max(
+                            self._timeline_cursor_ms + 1,
+                            self._timeline_cursor_ms
+                            + round(chunk.size * 1000 / 16000),
+                        ),
+                        is_final=False,
+                    )
+                )
+        else:
+            self._last_draft = ""
+        return output
+
+    def _collect_new_finalized_tokens(self) -> None:
+        finalized_tokens = list(getattr(self._stream, "finalized_tokens", None) or [])
+        if len(finalized_tokens) < self._finalized_token_count:
+            # A stream should not move backwards, but resetting here keeps a
+            # reused/faulty runtime from duplicating the entire transcript.
+            self._finalized_token_count = 0
+            self._pending_final_tokens = []
+        self._pending_final_tokens.extend(finalized_tokens[self._finalized_token_count :])
+        self._finalized_token_count = len(finalized_tokens)
+
+    @staticmethod
+    def _token_text(token: object) -> str:
+        return str(getattr(token, "text", "") or "")
+
+    @classmethod
+    def _tokens_text(cls, tokens: List[object]) -> str:
+        return "".join(cls._token_text(token) for token in tokens).strip()
+
+    @classmethod
+    def _split_completed_sentences(
+        cls, tokens: List[object]
+    ) -> Tuple[List[List[object]], List[object]]:
+        completed: List[List[object]] = []
+        sentence_start = 0
+        for index, token in enumerate(tokens):
+            token_text = cls._token_text(token).rstrip()
+            next_text = cls._token_text(tokens[index + 1]) if index + 1 < len(tokens) else ""
+            is_boundary = any(token_text.endswith(mark) for mark in ("!", "?", "。", "？", "！"))
+            is_boundary = is_boundary or (
+                token_text.endswith(".")
+                and (index == len(tokens) - 1 or " " in next_text)
+            )
+            words_so_far = len(cls._tokens_text(tokens[sentence_start : index + 1]).split())
+            is_word_limit = (
+                words_so_far >= cls.max_words_per_segment
+                and index < len(tokens) - 1
+            )
+            if is_boundary or is_word_limit:
+                completed.append(tokens[sentence_start : index + 1])
+                sentence_start = index + 1
+        return completed, tokens[sentence_start:]
+
+    @classmethod
+    def _bounded_draft_text(cls, text: str) -> str:
+        words = text.split()
+        if len(words) <= cls.max_words_in_current_draft:
+            return text
+        return "… " + " ".join(words[-cls.max_words_in_current_draft :])
+
+    @classmethod
+    def _token_group_duration_ms(cls, tokens: List[object]) -> int:
+        if not tokens:
+            return 1
+        starts = [float(getattr(token, "start", 0.0) or 0.0) for token in tokens]
+        ends = []
+        for token, start in zip(tokens, starts):
+            end = getattr(token, "end", None)
+            if end is None:
+                end = start + float(getattr(token, "duration", 0.0) or 0.0)
+            ends.append(float(end or start))
+        duration = round(max(0.0, max(ends) - min(starts)) * 1000)
+        return max(1, duration or len(tokens) * 120)
+
+    def _segments_from_token_groups(
+        self, groups: List[List[object]], *, final: bool = True
+    ) -> List[TranscriptSegment]:
+        output: List[TranscriptSegment] = []
+        for tokens in groups:
+            text = self._tokens_text(tokens)
+            if self._timeline_cursor_ms > 0 and text.startswith(".") and not text.startswith("..."):
+                text = text[1:].lstrip()
+            if not text:
+                continue
+            start_ms = self._timeline_cursor_ms
+            end_ms = start_ms + self._token_group_duration_ms(tokens)
+            self._timeline_cursor_ms = end_ms
+            self._segment_number += 1
+            output.append(
+                TranscriptSegment(
+                    id="mlx-%d" % self._segment_number,
+                    text=text,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    is_final=final,
+                )
+            )
+        return output
+
+    def _new_sentence_segments(self, result: object) -> List[TranscriptSegment]:
         output: List[TranscriptSegment] = []
         for sentence in getattr(result, "sentences", None) or []:
             text = str(getattr(sentence, "text", "") or "").strip()
@@ -147,8 +291,8 @@ class MlxParakeetProvider:
             if key in self._emitted:
                 continue
             self._emitted.add(key)
-            start_ms = max(0, round(start * 1000) - window_start_ms)
-            end_ms = max(start_ms, round(end * 1000) - window_start_ms)
+            start_ms = max(0, round(start * 1000))
+            end_ms = max(start_ms, round(end * 1000))
             self._segment_number += 1
             output.append(
                 TranscriptSegment(
@@ -177,7 +321,19 @@ class MlxParakeetProvider:
     def flush(self) -> List[TranscriptSegment]:
         if self._stream is None:
             return []
-        return self._new_sentence_segments(self._stream.result, 0)
+        if self._uses_token_stability_protocol():
+            self._collect_new_finalized_tokens()
+            completed, remaining = self._split_completed_sentences(
+                self._pending_final_tokens
+            )
+            output = self._segments_from_token_groups(completed)
+            tail = remaining + list(getattr(self._stream, "draft_tokens", None) or [])
+            if self._tokens_text(tail):
+                output.extend(self._segments_from_token_groups([tail]))
+            self._pending_final_tokens = []
+            self._last_draft = ""
+            return output
+        return self._new_sentence_segments(self._stream.result)
 
     def close(self) -> None:
         stream = self._stream

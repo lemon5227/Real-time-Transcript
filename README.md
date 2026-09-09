@@ -51,7 +51,7 @@ For development and tests:
 pip install -r requirements-dev.txt
 ```
 
-On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. The model/runtime downloads on first use.
+On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. Open the gear-shaped Settings button to inspect model readiness and pre-download local models before class; runtime-managed models remain available as a first-use fallback.
 
 ## Choose a runtime
 

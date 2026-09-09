@@ -27,7 +27,11 @@
         </nav>
 
         <div class="topbar-actions">
-          <span class="privacy-badge"><span class="privacy-lock">⌁</span>本地优先</span>
+          <div class="topbar-listen-control">
+            <span class="visually-hidden" id="recording-state">麦克风已就绪</span><span class="visually-hidden" id="recording-device">选择设备后可先测试声音</span>
+            <div class="sound-bars" id="sound-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <button id="start-listening" class="record-button topbar-record-button" type="button" aria-describedby="recording-state"><span class="record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.8a3.2 3.2 0 0 0-3.2 3.2v5a3.2 3.2 0 0 0 6.4 0V7A3.2 3.2 0 0 0 12 3.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M5.7 11.8a6.3 6.3 0 0 0 12.6 0M12 18.1v3M8.8 21.1h6.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span id="start-listening-label">开始听课</span></button>
+          </div>
           <button class="icon-button" id="help-button" type="button" aria-label="查看快捷键" title="快捷键">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor"/><path d="M9.8 9.2a2.35 2.35 0 1 1 3.54 2.03c-.85.5-1.34 1.07-1.34 2.27M12 16.7h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
           </button>
@@ -35,10 +39,10 @@
       </header>
 
       <a class="skip-link" href="#main-content">跳到主要内容</a>
-      <main class="workspace" id="main-content">
+      <main class="workspace workspace-classroom" id="main-content">
         <section class="stage-panel" aria-labelledby="page-title">
           <div class="stage-header">
-            <div>
+            <div class="stage-intro" id="lecture-intro">
               <div class="eyebrow"><span class="eyebrow-line"></span>LIVE LECTURE / 实时课堂</div>
               <div class="title-row">
                 <h1 id="page-title">让每一句课<br><em>都来得及听懂。</em></h1>
@@ -46,11 +50,16 @@
               </div>
               <div class="session-status" role="status"><span class="status-dot" id="status-dot"></span><span id="connection-status">正在准备听课空间</span><span class="status-divider"></span><span id="model-status">检测设备与模型中…</span></div>
             </div>
-            <div class="head-metrics" aria-label="会话统计">
-              <div class="metric"><strong id="segment-count">0</strong><span>段字幕</span></div>
-              <div class="metric"><strong id="live-clock">00:00</strong><span>本次时长</span></div>
+            <div class="stage-header-side">
+              <button class="stage-intro-toggle" id="toggle-lecture-intro" type="button" aria-expanded="true" aria-controls="lecture-intro"><span id="lecture-intro-toggle-label">收起介绍</span><span class="stage-intro-chevron" aria-hidden="true">⌃</span></button>
+              <div class="head-metrics" aria-label="会话统计">
+                <div class="metric"><strong id="segment-count">0</strong><span>段字幕</span></div>
+                <div class="metric"><strong id="live-clock">00:00</strong><span>本次时长</span></div>
+              </div>
             </div>
           </div>
+
+          <div class="lecture-intro-compact" id="lecture-intro-compact" hidden aria-hidden="true"><div><span class="compact-lecture-label">LIVE LECTURE</span><strong>实时课堂</strong><span id="compact-session-status">字幕区域已进入专注模式</span></div><button class="stage-intro-toggle is-compact" id="toggle-lecture-intro-compact" type="button" aria-expanded="false" aria-controls="lecture-intro" aria-label="展开课堂介绍"><span id="lecture-intro-compact-label">展开介绍</span><span class="stage-intro-chevron" aria-hidden="true">⌄</span></button></div>
 
           <div class="transcript-shell">
             <div class="transcript-toolbar">
@@ -78,80 +87,91 @@
           </div>
         </section>
 
-        <aside class="side-column" aria-label="会话设置">
-          <section class="setup-card">
-            <div class="card-heading"><div><p class="eyebrow">SESSION SETUP</p><h2>这节课的设置</h2></div><span class="step-mark">01</span></div>
-
-            <div class="field-block setup-field setup-course-field">
-              <label class="field-label" for="course-title">课程标记 <span>可选</span></label>
-              <input class="text-input" id="course-title" type="text" maxlength="80" placeholder="例如：ECON 201 · Week 4">
-            </div>
-
-            <div class="field-block setup-field setup-path-field">
-              <div class="setup-field-heading"><span class="field-label">推理路径</span><span class="field-note">按设备选择</span></div>
-              <div class="mode-switch" role="group" aria-label="选择推理路径">
-                <button type="button" class="mode-option is-selected" data-mode="auto" aria-pressed="true"><strong>自动</strong><small>聪明地选择</small></button>
-                <button type="button" class="mode-option" data-mode="local" aria-pressed="false"><strong>本地</strong><small>设备内处理</small></button>
-                <button type="button" class="mode-option" data-mode="cloud" aria-pressed="false"><strong>云端</strong><small>轻薄本友好</small></button>
+        <aside class="quick-settings" id="quick-settings" aria-label="常用课堂设置">
+          <section class="quick-card quick-card-minimal">
+            <div class="quick-card-heading"><div><p class="eyebrow">LIVE CONTROLS</p><h2>上课时常用</h2></div><div class="quick-card-actions"><span class="quick-rail-status-light quick-rail-collapsed-light" data-status="idle" aria-hidden="true"></span><button class="quick-more-button" id="quick-open-settings" type="button">更多设置 <span>↗</span></button><button class="quick-rail-toggle" id="toggle-quick-settings" type="button" aria-expanded="true" aria-controls="quick-settings-body" aria-label="收起右侧栏" title="收起右侧栏"><span class="quick-rail-panel-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><rect x="3.5" y="3.5" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.25"/><path d="M9 4v12" stroke="currentColor" stroke-width="1.25"/></svg></span></button></div></div>
+            <div class="quick-rail-body" id="quick-settings-body">
+              <div class="quick-field quick-path-field">
+                <div class="setup-field-heading"><span class="field-label">推理路径</span><span class="field-note">自动会按设备选择</span></div>
+                <div class="mode-switch" role="group" aria-label="选择推理路径">
+                  <button type="button" class="mode-option is-selected" data-mode="auto" aria-pressed="true"><strong>自动</strong><small>推荐</small></button>
+                  <button type="button" class="mode-option" data-mode="local" aria-pressed="false"><strong>本地</strong><small>隐私优先</small></button>
+                  <button type="button" class="mode-option" data-mode="cloud" aria-pressed="false"><strong>云端</strong><small>轻薄本</small></button>
+                </div>
               </div>
-            </div>
 
-              <div class="field-grid setup-field-grid">
-              <div class="field-block"><label class="field-label" for="model-select">模型</label><select class="text-input select-input" id="model-select"><option value="parakeet-tdt-0.6b-v3">Parakeet TDT v3 · Mac MLX · 英语课堂</option><option value="distil-small.en" selected>Distil Small EN · 英语课堂</option><option value="small">Small · 均衡</option><option value="base">Base · 轻量</option><option value="tiny">Tiny · 最省资源</option><option value="medium">Medium · 更准确</option><option value="large-v3-turbo">Large v3 Turbo · 高性能</option></select></div>
-              <div class="field-block"><label class="field-label" for="language-select">讲课语言</label><select class="text-input select-input" id="language-select"><option value="en">English</option><option value="zh">中文</option><option value="auto">自动识别</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div>
-              <div class="model-brief" id="model-selection-note" aria-live="polite"><div class="model-brief-head"><span class="model-profile-badge" id="model-profile-badge">英语课堂</span><span class="model-ready-chip" id="model-ready-chip">检查中</span></div><div class="model-specs" aria-label="模型选择指标"><span><small>速度</small><strong id="model-speed">—</strong></span><span><small>质量</small><strong id="model-quality">—</strong></span><span><small>占用</small><strong id="model-resource">—</strong></span></div><p id="model-selection-summary">加载模型速度、质量和设备占用…</p></div>
-            </div>
-
-            <div class="translation-settings setup-field setup-translation-field" aria-labelledby="translation-settings-title">
-              <div class="setup-field-heading"><label class="field-label" id="translation-settings-title" for="translation-mode">实时翻译</label><span class="field-note field-note-amber">可课中开启</span></div>
-              <select class="text-input select-input" id="translation-mode"><option value="off">关闭 · 节省资源</option><option value="fast">快速翻译 · Google / Microsoft</option><option value="precise">精确翻译 · 模型</option><option value="auto">自动选择精确模型</option></select>
-              <div class="field-grid translation-grid">
-                <div class="field-block"><label class="field-label" for="translation-provider">快速服务</label><select class="text-input select-input" id="translation-provider"><option value="google">Google Cloud</option><option value="microsoft">Microsoft Translator</option></select></div>
-                <div class="field-block"><label class="field-label" for="translation-target">目标语言</label><select class="text-input select-input" id="translation-target"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div>
+              <div class="quick-translation-row">
+                <div class="quick-translation-copy"><span class="quick-inline-kicker">TRANSLATION</span><strong>课中翻译</strong><small id="quick-translation-detail">关闭时不占用资源 · 中文复习辅助</small></div>
+                <label class="quick-translation-toggle" for="quick-translation-toggle">
+                  <input id="quick-translation-toggle" type="checkbox" aria-label="课中翻译">
+                  <span class="quick-translation-state" id="quick-translation-state">关闭</span>
+                  <span class="toggle-ui" aria-hidden="true"></span>
+                </label>
               </div>
-              <div class="translation-model-row"><label class="field-label" for="translation-model-mode">精确方式</label><select class="text-input select-input" id="translation-model-mode"><option value="auto">自动 · 本地优先</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select><small id="translation-status">实时翻译默认关闭；课后可再精确翻译</small></div>
-            </div>
 
-            <div class="capability-panel" id="capability-panel" aria-live="polite">
-              <div class="capability-icon" aria-hidden="true">✦</div>
-              <div class="capability-copy"><strong id="capability-title">正在读取设备能力</strong><p id="capability-note">马上告诉你哪条路径最顺畅。</p></div>
-              <span class="runtime-badge" id="runtime-badge">检测中</span>
-            </div>
-
-            <section class="readiness-panel" id="readiness-panel" aria-labelledby="readiness-title" aria-live="polite" aria-busy="true">
-              <div class="readiness-heading"><div><p class="eyebrow">BEFORE CLASS</p><h3 id="readiness-title">上课前检查</h3></div><span class="readiness-summary" id="readiness-summary">检查中…</span></div>
-              <div class="readiness-list">
-                <div class="readiness-row" id="model-readiness-row"><span class="readiness-icon" aria-hidden="true">✦</span><div><strong>转录模型</strong><small id="model-readiness-status">正在检查模型</small></div><button class="readiness-action" id="model-download-button" type="button" hidden>下载模型</button></div>
-                <div class="readiness-row" id="mic-readiness-row"><span class="readiness-icon" aria-hidden="true">⌁</span><div><strong>麦克风</strong><small id="mic-readiness-status">选择设备并测试声音</small></div><span class="readiness-check" id="mic-readiness-check" aria-hidden="true">○</span></div>
-                <div class="readiness-row" id="connection-readiness-row"><span class="readiness-icon" aria-hidden="true">↗</span><div><strong>实时连接</strong><small id="connection-readiness-status">等待后端连接</small></div><span class="readiness-check" id="connection-readiness-check" aria-hidden="true">○</span></div>
-                <div class="readiness-row" id="audio-readiness-row"><span class="readiness-icon" aria-hidden="true">♫</span><div><strong>原声保存</strong><small id="audio-readiness-status">正在检查本机存储</small></div><span class="readiness-check" id="audio-readiness-check" aria-hidden="true">○</span></div>
+              <div class="quick-rail-status" aria-live="polite">
+                <div class="quick-rail-status-heading"><div class="quick-rail-status-title"><span class="quick-rail-status-light" id="quick-rail-status-light" data-status="idle" aria-hidden="true"></span><div><span class="quick-status-kicker">SESSION STATUS</span><strong>当前课堂</strong></div></div><span id="quick-rail-session-state">等待开始</span></div>
+                <dl class="quick-rail-status-list"><div class="quick-status-item quick-status-item-wide"><dt>模型</dt><dd class="quick-status-value" id="quick-rail-model">正在检查</dd></div><div class="quick-status-item"><dt>运行方式</dt><dd class="quick-status-value" id="quick-rail-runtime">检测中</dd></div><div class="quick-status-item"><dt>原声</dt><dd class="quick-status-value" id="quick-rail-audio">仅保存在本机</dd></div></dl>
               </div>
-            </section>
 
-            <div class="microphone-tools" id="microphone-tools">
-              <div class="field-block"><label class="field-label" for="microphone-select">输入设备</label><select class="text-input select-input" id="microphone-select"><option value="">浏览器默认麦克风</option></select></div>
-              <div class="mic-test-row"><button class="secondary-button" id="test-microphone" type="button">测试麦克风</button><div class="mic-meter-wrap"><div class="mic-meter" id="mic-level" role="progressbar" aria-label="麦克风输入音量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="mic-level-fill"></span></div><span id="mic-level-label">尚未测试</span></div></div>
+              <section class="quick-rail-review" id="quick-rail-review" aria-labelledby="quick-rail-review-title">
+                <div class="quick-rail-review-heading"><p class="eyebrow">AFTER CLASS</p><span>02</span></div>
+                <h3 id="quick-rail-review-title">课后继续学习</h3>
+                <p>原声和字幕会留在本机，课后可以回听、搜索和整理重点。</p>
+                <div class="quick-review-pills"><span>原声保留</span><span>字幕可搜索</span></div>
+                <a href="/review" class="inline-link">打开复习空间 <span>↗</span></a>
+              </section>
             </div>
-
-            <div class="audio-save-row">
-              <label class="audio-save-option" for="save-audio"><input id="save-audio" type="checkbox" checked><span><strong>保存原声</strong><small>推荐 · 仅本机</small></span></label>
-              <small id="audio-storage-status">原声会按片段持续保存在本机浏览器</small>
-            </div>
-
-            <div class="privacy-note"><span aria-hidden="true">◌</span><p><strong>隐私提示</strong><br><span id="privacy-copy">自动模式会优先使用已准备好的本地模型；本地不可用时，需确认后才会发送音频到云端。</span></p></div>
-          </section>
-
-          <section class="tip-card">
-            <div class="tip-number">02</div><div><p class="eyebrow">AFTER CLASS</p><h3>课后继续学习</h3><p>结束后，字幕会保存为一份可搜索的课堂笔记。回到复习页，标记重点、补充自己的理解。</p><a href="/review" class="inline-link">打开复习空间 <span>↗</span></a></div>
           </section>
         </aside>
+
+        <dialog id="settings-drawer" class="settings-drawer" aria-labelledby="settings-title">
+          <div class="settings-shell" id="settings-content">
+            <header class="settings-header">
+              <div class="settings-header-copy"><p class="eyebrow">CONTROL ROOM / 设置中心</p><h2 id="settings-title">把下一节课准备好</h2><p>课堂保持专注，设备、模型与翻译在这里一次配置清楚。</p></div>
+              <div class="settings-header-meta"><span class="settings-locality"><span class="settings-locality-dot" aria-hidden="true"></span>设置只保存在本机</span><button class="dialog-close" id="close-settings" type="button" aria-label="关闭设置">×</button></div>
+            </header>
+
+            <div class="settings-layout">
+              <nav class="settings-nav" aria-label="设置分区">
+                <p class="settings-nav-label">SETTINGS</p>
+                <button class="settings-nav-item is-active" type="button" data-settings-target="settings-session" aria-selected="true" aria-controls="settings-session"><span class="settings-nav-index">01</span><span><strong>课堂</strong><small>课程与推理路径</small></span></button>
+                <button class="settings-nav-item" type="button" data-settings-target="model-management" aria-selected="false" aria-controls="model-management"><span class="settings-nav-index">02</span><span><strong>模型库</strong><small>下载与运行状态</small></span></button>
+                <button class="settings-nav-item" type="button" data-settings-target="settings-audio" aria-selected="false" aria-controls="settings-audio"><span class="settings-nav-index">03</span><span><strong>声音与保存</strong><small>输入设备与原声</small></span></button>
+                <button class="settings-nav-item" type="button" data-settings-target="settings-translation" aria-selected="false" aria-controls="settings-translation"><span class="settings-nav-index">04</span><span><strong>翻译</strong><small>课中与课后辅助</small></span></button>
+                <div class="settings-nav-note"><span class="settings-nav-note-mark" aria-hidden="true">⌁</span><p>本地优先<br><span>云端仅在需要时使用</span></p></div>
+              </nav>
+
+              <div class="settings-content-scroll" id="settings-scroll">
+                <section class="settings-section settings-session-section" id="settings-session" data-settings-section aria-labelledby="settings-session-title">
+                  <div class="settings-overview">
+                    <div class="settings-overview-copy"><p class="eyebrow">SESSION SNAPSHOT / 当前课堂</p><h3 id="settings-session-title">下一节课，从这里开始</h3><p>先确认推理路径和模型。系统会根据你的设备给出建议，准备完成后就能直接开始听课。</p></div>
+                    <div class="settings-overview-stats"><div class="settings-overview-stat"><span>当前策略</span><strong id="settings-mode-summary">自动</strong><small id="settings-mode-note">按设备选择最合适路径</small></div><div class="settings-overview-stat"><span>设备运行时</span><strong id="settings-device-summary">检测中</strong><small id="settings-device-note">正在读取设备能力</small></div></div>
+                    <div class="capability-panel" id="capability-panel" aria-live="polite"><div class="capability-icon" aria-hidden="true">✦</div><div class="capability-copy"><strong id="capability-title">正在读取设备能力</strong><p id="capability-note">马上告诉你哪条路径最顺畅。</p></div><span class="runtime-badge" id="runtime-badge">检测中</span></div>
+                  </div>
+
+                  <div class="settings-section-heading"><div><p class="eyebrow">SESSION SETUP</p><h3>这节课的设置</h3></div><span class="settings-section-index">01</span></div>
+                  <div class="field-block setup-field setup-course-field"><label class="field-label" for="course-title">课程标记 <span>可选</span></label><input class="text-input" id="course-title" type="text" maxlength="80" placeholder="例如：ECON 201 · Week 4"></div>
+                  <div class="field-block setup-field setup-path-field"><div class="setup-field-heading"><span class="field-label">推理路径</span><span class="field-note">按设备选择</span></div><div class="mode-switch" role="group" aria-label="选择推理路径"><button type="button" class="mode-option is-selected" data-mode="auto" aria-pressed="true"><strong>自动</strong><small>聪明地选择</small></button><button type="button" class="mode-option" data-mode="local" aria-pressed="false"><strong>本地</strong><small>设备内处理</small></button><button type="button" class="mode-option" data-mode="cloud" aria-pressed="false"><strong>云端</strong><small>轻薄本友好</small></button></div></div>
+                  <div class="field-grid setup-field-grid"><div class="field-block"><label class="field-label" for="model-select">模型</label><select class="text-input select-input" id="model-select"><option value="parakeet-tdt-0.6b-v3">Parakeet TDT v3 · Mac MLX · 英语课堂</option><option value="distil-small.en" selected>Distil Small EN · 英语课堂</option><option value="small">Small · 均衡</option><option value="base">Base · 轻量</option><option value="tiny">Tiny · 最省资源</option><option value="medium">Medium · 更准确</option><option value="large-v3-turbo">Large v3 Turbo · 高性能</option></select></div><div class="field-block"><label class="field-label" for="language-select">讲课语言</label><select class="text-input select-input" id="language-select"><option value="en">English</option><option value="zh">中文</option><option value="auto">自动识别</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div><div class="model-brief" id="model-selection-note" aria-live="polite"><div class="model-brief-head"><span class="model-profile-badge" id="model-profile-badge">英语课堂</span><span class="model-ready-chip" id="model-ready-chip">检查中</span></div><div class="model-specs" aria-label="模型选择指标"><span><small>速度</small><strong id="model-speed">—</strong></span><span><small>质量</small><strong id="model-quality">—</strong></span><span><small>占用</small><strong id="model-resource">—</strong></span></div><p id="model-selection-summary">加载模型速度、质量和设备占用…</p></div></div>
+
+                  <section class="readiness-panel" id="readiness-panel" aria-labelledby="readiness-title" aria-live="polite" aria-busy="true"><div class="readiness-heading"><div><p class="eyebrow">BEFORE CLASS</p><h3 id="readiness-title">上课前检查</h3></div><span class="readiness-summary" id="readiness-summary">检查中…</span></div><div class="readiness-list"><div class="readiness-row" id="model-readiness-row"><span class="readiness-icon" aria-hidden="true">✦</span><div><strong>转录模型</strong><small id="model-readiness-status">正在检查模型</small></div><button class="readiness-action" id="model-download-button" type="button" hidden>下载模型</button></div><div class="readiness-row" id="mic-readiness-row"><span class="readiness-icon" aria-hidden="true">⌁</span><div><strong>麦克风</strong><small id="mic-readiness-status">选择设备并测试声音</small></div><span class="readiness-check" id="mic-readiness-check" aria-hidden="true">○</span></div><div class="readiness-row" id="connection-readiness-row"><span class="readiness-icon" aria-hidden="true">↗</span><div><strong>实时连接</strong><small id="connection-readiness-status">等待后端连接</small></div><span class="readiness-check" id="connection-readiness-check" aria-hidden="true">○</span></div><div class="readiness-row" id="audio-readiness-row"><span class="readiness-icon" aria-hidden="true">♫</span><div><strong>原声保存</strong><small id="audio-readiness-status">正在检查本机存储</small></div><span class="readiness-check" id="audio-readiness-check" aria-hidden="true">○</span></div></div></section>
+                </section>
+
+                <section class="settings-section model-library-section" id="model-management" data-settings-section aria-labelledby="model-management-title" hidden><div class="settings-section-heading"><div><p class="eyebrow">MODEL LIBRARY / 本地模型</p><h3 id="model-management-title">模型下载管理</h3></div><span class="model-management-count" id="model-management-count">读取中</span></div><div class="model-library-hero"><div class="model-library-hero-icon" aria-hidden="true"><span></span><span></span><span></span></div><div class="model-library-hero-copy"><span class="model-library-hero-label">设备推荐</span><strong id="model-library-recommendation">正在读取推荐模型</strong><p id="model-library-hero-note">模型文件和运行依赖会分别显示，避免把“未下载”和“不可运行”混在一起。</p></div><div class="model-library-hero-state"><span class="model-manager-status-dot" id="model-library-status-dot" data-status="idle" aria-hidden="true"></span><span id="model-library-hero-status">检查中</span></div></div><p class="model-management-copy">提前准备好模型，上课时不会临时等待。下载只会写入本机缓存，不会改变当前选择。</p><div class="model-management-list" id="model-management-list" aria-live="polite"><div class="model-management-empty">正在读取模型目录…</div></div></section>
+
+                <section class="settings-section settings-audio-section" id="settings-audio" data-settings-section aria-labelledby="settings-audio-title" hidden><div class="settings-section-heading"><div><p class="eyebrow">AUDIO &amp; STORAGE / 输入与保存</p><h3 id="settings-audio-title">让声音清楚地留下来</h3></div><span class="settings-section-index">03</span></div><div class="settings-audio-intro"><span class="settings-section-symbol" aria-hidden="true">⌁</span><p>课中识别依赖稳定输入；原声默认保存在本机，课后复习时可以回听上下文。</p></div><div class="microphone-tools" id="microphone-tools"><div class="field-block"><label class="field-label" for="microphone-select">输入设备</label><select class="text-input select-input" id="microphone-select"><option value="">浏览器默认麦克风</option></select></div><div class="mic-test-row"><button class="secondary-button" id="test-microphone" type="button">测试麦克风</button><div class="mic-meter-wrap"><div class="mic-meter" id="mic-level" role="progressbar" aria-label="麦克风输入音量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="mic-level-fill"></span></div><span id="mic-level-label">尚未测试</span></div></div></div><div class="audio-save-row"><label class="audio-save-option" for="save-audio"><input id="save-audio" type="checkbox" checked><span><strong>保存原声</strong><small>推荐 · 仅本机</small></span></label><small id="audio-storage-status">原声会按片段持续保存在本机浏览器</small></div><div class="privacy-note"><span aria-hidden="true">◌</span><p><strong>隐私提示</strong><br><span id="privacy-copy">自动模式会优先使用已准备好的本地模型；本地不可用时，需确认后才会发送音频到云端。</span></p></div></section>
+
+                <section class="settings-section settings-translation-section" id="settings-translation" data-settings-section aria-labelledby="settings-translation-title" hidden><div class="settings-section-heading"><div><p class="eyebrow">TRANSLATION / 中文辅助</p><h3 id="settings-translation-title">需要时，再打开翻译</h3></div><span class="settings-section-index">04</span></div><div class="settings-translation-intro"><span class="settings-section-symbol" aria-hidden="true">文</span><p>英文课堂建议先保持关闭，避免抢占转录资源；需要时可选择 Google / Microsoft 快速翻译，课后再用模型精修。</p></div><div class="translation-settings setup-field setup-translation-field" aria-labelledby="translation-settings-title"><div class="setup-field-heading"><label class="field-label" id="translation-settings-title" for="translation-mode">实时翻译</label><span class="field-note field-note-amber">可课中开启</span></div><select class="text-input select-input" id="translation-mode"><option value="off">关闭 · 节省资源</option><option value="fast">快速翻译 · Google / Microsoft</option><option value="precise">精确翻译 · 模型</option><option value="auto">自动选择精确模型</option></select><div class="field-grid translation-grid"><div class="field-block"><label class="field-label" for="translation-provider">快速服务</label><select class="text-input select-input" id="translation-provider"><option value="google">Google Cloud</option><option value="microsoft">Microsoft Translator</option></select></div><div class="field-block"><label class="field-label" for="translation-target">目标语言</label><select class="text-input select-input" id="translation-target"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></div></div><div class="translation-model-row"><label class="field-label" for="translation-model-mode">精确方式</label><select class="text-input select-input" id="translation-model-mode"><option value="auto">自动 · 本地优先</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select><small id="translation-status">实时翻译默认关闭；课后可再精确翻译</small></div></div></section>
+
+                <section class="settings-callout"><div class="tip-number">↗</div><div><p class="eyebrow">AFTER CLASS</p><h3>课后继续学习</h3><p>原声和字幕会保存为可搜索的课堂笔记。结束后回到复习空间，回听、标记重点，再补充自己的理解。</p><a href="/review" class="inline-link">打开复习空间 <span>↗</span></a></div></section>
+              </div>
+            </div>
+            <footer class="settings-footer"><span><span class="settings-footer-dot" aria-hidden="true"></span>更改会自动保存在本机</span><button class="settings-done-button" id="settings-done" type="button">完成设置</button></footer>
+          </div>
+        </dialog>
       </main>
 
-      <footer class="control-dock">
-        <div class="dock-context"><span class="dock-label">MICROPHONE</span><strong id="recording-state">麦克风已就绪</strong><span id="recording-device">选择设备后可先测试声音</span></div>
-        <div class="dock-center"><div class="sound-bars" id="sound-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><button id="start-listening" class="record-button" type="button" aria-describedby="recording-state"><span class="record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.8a3.2 3.2 0 0 0-3.2 3.2v5a3.2 3.2 0 0 0 6.4 0V7A3.2 3.2 0 0 0 12 3.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M5.7 11.8a6.3 6.3 0 0 0 12.6 0M12 18.1v3M8.8 21.1h6.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span id="start-listening-label">开始听课</span></button></div>
-        <div class="dock-shortcut"><kbd>Space</kbd><span>快捷开始</span></div>
-      </footer>
     </div>
 
     <dialog id="help-dialog" class="help-dialog"><button class="dialog-close" id="close-help" type="button" aria-label="关闭">×</button><p class="eyebrow">QUICK GUIDE</p><h2>把注意力留给课堂</h2><div class="shortcut-row"><kbd>Space</kbd><span>开始 / 停止听课</span></div><div class="shortcut-row"><kbd>⌘ K</kbd><span>聚焦课程标记</span></div><p class="dialog-footnote">建议在课前先打开页面，选择最适合你设备的推理路径。</p></dialog>

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 
 class ModelManager:
-    """Report Whisper weight readiness and download one model at a time.
+    """Report local weight readiness and download one model at a time.
 
     The manager deliberately does not import Whisper during construction. This keeps
     the page and capabilities endpoints fast on machines without local dependencies.
@@ -25,10 +25,12 @@ class ModelManager:
         catalog: Iterable[Mapping[str, object]],
         dependency_checker: Optional[Callable[[str], bool]] = None,
         cache_root: Optional[Path] = None,
+        runtime_cache_root: Optional[Path] = None,
     ):
         self._catalog = {str(model["id"]): dict(model) for model in catalog}
         self._dependency_checker = dependency_checker or self._default_dependency_checker
         self._cache_root = Path(cache_root) if cache_root else self._default_cache_root()
+        self._runtime_cache_root = Path(runtime_cache_root) if runtime_cache_root else self._default_runtime_cache_root()
         self._states: Dict[str, Dict[str, object]] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._lock = threading.RLock()
@@ -56,6 +58,19 @@ class ModelManager:
             return Path(xdg_cache).expanduser() / "whisper"
         return Path.home() / ".cache" / "whisper"
 
+    @staticmethod
+    def _default_runtime_cache_root() -> Path:
+        configured = os.environ.get("HF_HUB_CACHE", "").strip()
+        if configured:
+            return Path(configured).expanduser()
+        hf_home = os.environ.get("HF_HOME", "").strip()
+        if hf_home:
+            return Path(hf_home).expanduser() / "hub"
+        xdg_cache = os.environ.get("XDG_CACHE_HOME", "").strip()
+        if xdg_cache:
+            return Path(xdg_cache).expanduser() / "huggingface" / "hub"
+        return Path.home() / ".cache" / "huggingface" / "hub"
+
     def list_models(self):
         with self._lock:
             return [self._snapshot(model_id) for model_id in self._catalog]
@@ -73,17 +88,31 @@ class ModelManager:
             current = self._snapshot(model_id)
             if current["status"] == "downloading":
                 return current
-            if not current["dependency_available"]:
-                return current
             if current["weights_available"]:
                 return current
-            url = self._resolve_url(model_id)
-            if not url:
+            if self._is_runtime_model(model_id):
+                if not current["download_supported"]:
+                    return current
+                cancel_event = threading.Event()
+                self._cancel_events[model_id] = cancel_event
                 self._states[model_id] = {
-                    "status": "runtime_download",
-                    "message": "本地运行时会在首次启动时下载模型",
+                    "status": "downloading",
+                    "downloaded_bytes": 0,
+                    "total_bytes": 0,
+                    "progress": 0,
+                    "message": "正在从 Hugging Face 下载模型",
                     "error": None,
                 }
+                worker = threading.Thread(
+                    target=self._download_runtime_model,
+                    args=(model_id, cancel_event),
+                    daemon=True,
+                    name="model-download-%s" % model_id,
+                )
+                worker.start()
+                return self._snapshot(model_id)
+            url = self._resolve_url(model_id)
+            if not url:
                 return self._snapshot(model_id)
             cancel_event = threading.Event()
             self._cancel_events[model_id] = cancel_event
@@ -123,7 +152,7 @@ class ModelManager:
         return self.get_model(model_id)
 
     def _resolve_url(self, model_id: str) -> Optional[str]:
-        if str(self._catalog[model_id].get("runtime") or "standard") == "mlx":
+        if self._is_runtime_model(model_id):
             return None
         configured = self._catalog[model_id].get("url")
         if configured:
@@ -138,17 +167,48 @@ class ModelManager:
         filename = Path(urlparse(url).path).name if url else "%s.pt" % model_id
         return self._cache_root / (filename or "%s.pt" % model_id)
 
+    def _is_runtime_model(self, model_id: str) -> bool:
+        return str(self._catalog[model_id].get("runtime") or "standard") == "mlx"
+
+    def _runtime_cache_files(self, model_id: str) -> Dict[str, Optional[str]]:
+        if not self._is_runtime_model(model_id):
+            return {}
+        model_ref = str(self._catalog[model_id].get("model_ref") or "").strip()
+        if not model_ref:
+            return {"config.json": None, "model.safetensors": None}
+        try:
+            huggingface = importlib.import_module("huggingface_hub")
+            return {
+                filename: huggingface.try_to_load_from_cache(
+                    model_ref,
+                    filename,
+                    cache_dir=str(self._runtime_cache_root),
+                )
+                for filename in ("config.json", "model.safetensors")
+            }
+        except (ImportError, AttributeError, OSError, TypeError, ValueError):
+            return {"config.json": None, "model.safetensors": None}
+
     def _snapshot(self, model_id: str):
         model = dict(self._catalog[model_id])
         model.setdefault("runtime", "standard")
         model.setdefault("model_ref", model_id)
         dependency_available = bool(self._dependency_checker(model_id))
-        url = self._resolve_url(model_id) if dependency_available else None
+        is_runtime = self._is_runtime_model(model_id)
+        url = self._resolve_url(model_id) if not is_runtime else None
         target = self._target_path(model_id, url)
-        downloaded_bytes = target.stat().st_size if target.is_file() else 0
-        weights_available = target.is_file() and downloaded_bytes > 0
+        runtime_files = self._runtime_cache_files(model_id) if is_runtime else {}
+        runtime_weights = runtime_files.get("model.safetensors") if runtime_files else None
+        target_exists = Path(runtime_weights).is_file() if runtime_weights else target.is_file()
+        target_size = Path(runtime_weights).stat().st_size if runtime_weights and Path(runtime_weights).is_file() else target.stat().st_size if target.is_file() else 0
+        downloaded_bytes = target_size
+        weights_available = target_exists and downloaded_bytes > 0
         state = dict(self._states.get(model_id, {}))
-        status = str(state.get("status") or ("dependency_missing" if not dependency_available else "ready" if weights_available else "not_downloaded" if url else "runtime_download"))
+        state_status = str(state.get("status") or "")
+        if state_status == "ready" and not dependency_available:
+            status = "dependency_missing"
+        else:
+            status = state_status or ("dependency_missing" if not dependency_available else "ready" if weights_available else "not_downloaded" if is_runtime or url else "runtime_download")
         if status == "downloading":
             downloaded_bytes = int(state.get("downloaded_bytes") or downloaded_bytes)
         total_bytes = int(state.get("total_bytes") or 0)
@@ -157,7 +217,7 @@ class ModelManager:
             {
                 "available": dependency_available,
                 "dependency_available": dependency_available,
-                "download_supported": bool(url),
+                "download_supported": bool(model.get("model_ref")) if is_runtime else bool(url),
                 "weights_available": weights_available,
                 "status": status,
                 "downloaded_bytes": downloaded_bytes,
@@ -180,6 +240,58 @@ class ModelManager:
             "failed": "模型下载失败，请重试",
             "runtime_download": "本地运行时会在首次启动时下载模型",
         }.get(status, "等待模型状态")
+
+    def _download_runtime_model(self, model_id: str, cancel_event: threading.Event) -> None:
+        model_ref = str(self._catalog[model_id].get("model_ref") or "").strip()
+        try:
+            huggingface = importlib.import_module("huggingface_hub")
+            if cancel_event.is_set():
+                raise _DownloadCancelled()
+            huggingface.hf_hub_download(
+                repo_id=model_ref,
+                filename="config.json",
+                cache_dir=str(self._runtime_cache_root),
+            )
+            self._set_state(model_id, progress=5, message="正在下载 Parakeet 配置")
+            if cancel_event.is_set():
+                raise _DownloadCancelled()
+            weights_path = huggingface.hf_hub_download(
+                repo_id=model_ref,
+                filename="model.safetensors",
+                cache_dir=str(self._runtime_cache_root),
+            )
+            if cancel_event.is_set():
+                raise _DownloadCancelled()
+            weight_size = Path(weights_path).stat().st_size if Path(weights_path).is_file() else 0
+            self._set_state(
+                model_id,
+                status="ready",
+                downloaded_bytes=weight_size,
+                total_bytes=weight_size,
+                progress=100,
+                message="模型已下载，可以开始听课",
+                error=None,
+            )
+        except _DownloadCancelled:
+            self._set_state(
+                model_id,
+                status="not_downloaded",
+                downloaded_bytes=0,
+                total_bytes=0,
+                progress=0,
+                message="已取消下载",
+                error=None,
+            )
+        except Exception as exc:
+            self._set_state(
+                model_id,
+                status="failed",
+                message="模型下载失败，请检查网络后重试",
+                error=str(exc),
+            )
+        finally:
+            with self._lock:
+                self._cancel_events.pop(model_id, None)
 
     def _set_state(self, model_id: str, **changes: object) -> None:
         with self._lock:

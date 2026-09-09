@@ -217,6 +217,268 @@ def test_mlx_provider_maps_stream_sentences_to_segments():
     assert result[0].start_ms == 200
 
 
+def test_mlx_provider_keeps_stream_sentence_timestamps_absolute():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Sentence:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+
+    class Stream:
+        def __init__(self):
+            self.calls = 0
+            self.result = type(
+                "Result",
+                (),
+                {"text": "First sentence.", "sentences": [Sentence("First sentence.", 0.2, 0.8)]},
+            )()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            self.calls += 1
+            if self.calls == 2:
+                self.result = type(
+                    "Result",
+                    (),
+                    {"text": "Second sentence.", "sentences": [Sentence("Second sentence.", 1.2, 1.8)]},
+                )()
+
+    stream = Stream()
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return stream
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    provider.push(np.zeros(16000, dtype=np.float32))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert result[0].text == "Second sentence."
+    assert result[0].start_ms == 1200
+
+
+def test_mlx_provider_keeps_parakeet_drafts_out_of_confirmed_history():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Sentence:
+        text, start, end = "Welcome to economics.", 0.2, 1.8
+
+    class Token:
+        def __init__(self, text):
+            self.text = text
+            self.start = 0.0
+            self.end = 0.5
+
+    class Stream:
+        finalized_tokens = []
+        draft_tokens = [Token(" Welcome"), Token(" to economics.")]
+        result = type("Result", (), {"text": "Welcome to economics.", "sentences": [Sentence()]})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [segment.text for segment in result] == ["Welcome to economics."]
+    assert result[0].is_final is False
+
+
+def test_mlx_provider_emits_a_newly_finalized_sentence_once():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start):
+            self.text = text
+            self.start = start
+            self.end = start + 0.5
+
+    class Stream:
+        def __init__(self):
+            self.finalized_tokens = []
+            self.draft_tokens = [Token(" Welcome", 0.0)]
+            self.result = type("Result", (), {"text": "Welcome", "sentences": []})()
+            self.calls = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            self.calls += 1
+            if self.calls == 2:
+                self.finalized_tokens = [
+                    Token(" Welcome", 0.0),
+                    Token(" to", 0.5),
+                    Token(" economics", 1.0),
+                    Token(".", 1.5),
+                ]
+                self.draft_tokens = []
+                self.result = type(
+                    "Result", (), {"text": "Welcome to economics.", "sentences": []}
+                )()
+
+    stream = Stream()
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return stream
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    provider.push(np.zeros(16000, dtype=np.float32))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+    repeated = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [(segment.text, segment.is_final) for segment in result] == [
+        ("Welcome to economics.", True)
+    ]
+    assert repeated == []
+
+
+def test_mlx_provider_breaks_unpunctuated_final_text_into_readable_chunks():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start):
+            self.text = text
+            self.start = start
+            self.end = start + 0.2
+
+    class Stream:
+        def __init__(self):
+            self.finalized_tokens = [Token(" word%d" % index, index * 0.2) for index in range(1, 26)]
+            self.draft_tokens = []
+            self.result = type("Result", (), {"text": "", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert result[0].is_final is True
+    assert result[0].text == " ".join("word%d" % index for index in range(1, 25))
+    assert result[1].is_final is False
+    assert result[1].text == "word25"
+
+
+def test_mlx_provider_does_not_split_on_internal_domain_periods():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text):
+            self.text = text
+            self.start = 0.0
+            self.end = 0.2
+
+    class Stream:
+        finalized_tokens = [
+            Token(" .tensorflow"),
+            Token(" dot autolog."),
+        ]
+        draft_tokens = []
+        result = type("Result", (), {"text": ".tensorflow dot autolog.", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [segment.text for segment in result] == [".tensorflow dot autolog."]
+    assert result[0].is_final is True
+
+
+def test_mlx_provider_removes_a_stray_period_at_history_boundary():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text):
+            self.text = text
+            self.start = 0.0
+            self.end = 0.2
+
+    class Stream:
+        finalized_tokens = [Token(" First."), Token(" .second sentence.")]
+        draft_tokens = []
+        result = type("Result", (), {"text": "First. .second sentence.", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    class Model:
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [segment.text for segment in result] == ["First.", "second sentence."]
+
+
 def test_mlx_provider_reports_missing_runtime():
     from backend.providers.mlx_parakeet import MlxParakeetProvider
 
