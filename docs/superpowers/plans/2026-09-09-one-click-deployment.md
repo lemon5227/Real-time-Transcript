@@ -284,7 +284,7 @@ def test_readme_contains_one_click_deploy_link():
 
 - [ ] **Step 2: Implement `render.yaml`**
 
-Define one web service with Docker runtime, the repository’s `Dockerfile`, a single worker-compatible start path, `plan: free`, `healthCheckPath: /api/health`, `HOST=0.0.0.0`, `TRANSCRIPTION_MODE=cloud`, a generated `SECRET_KEY`, and three `sync: false` cloud variables. Do not include model download commands, GPU settings, or translation secrets.
+Define one web service with Docker runtime, `dockerfilePath: ./Dockerfile`, `plan: free`, `autoDeploy: false`, `healthCheckPath: /api/health`, `HOST=0.0.0.0`, `TRANSCRIPTION_MODE=cloud`, a generated `SECRET_KEY`, and three `sync: false` cloud variables. Let the Dockerfile `CMD` provide the single worker-compatible start path. Do not include model download commands, GPU settings, or translation secrets.
 
 - [ ] **Step 3: Write the Chinese deployment guide**
 
