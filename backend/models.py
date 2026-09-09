@@ -14,7 +14,7 @@ class SessionConfig:
     enable_vad: bool = True
     window_seconds: float = 3.0
     overlap_seconds: float = 0.5
-    max_queue: int = 32
+    max_queue: int = 64
     stop_timeout_seconds: float = 5.0
 
     def __post_init__(self) -> None:

@@ -9,6 +9,11 @@ def test_config_defaults_to_localhost_and_auto_mode():
     assert config.transcription_mode == "auto"
 
 
+def test_default_audio_queue_covers_model_startup_buffer():
+    config = load_config({})
+    assert config.audio_max_queue == 64
+
+
 def test_public_config_never_contains_api_key():
     config = load_config({
         "CLOUD_BASE_URL": "https://example.test/v1",

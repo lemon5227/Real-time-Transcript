@@ -60,6 +60,33 @@ def test_google_provider_has_best_effort_public_fallback_without_key(monkeypatch
     assert captured[0]["params"] == {"client": "gtx", "sl": "en", "tl": "zh", "dt": "t", "q": "Hello"}
 
 
+def test_google_public_fallback_uses_http2_curl_after_rate_limit(monkeypatch):
+    def fake_get(*_args, **_kwargs):
+        return FakeResponse(429, {})
+
+    calls = []
+
+    class Completed:
+        returncode = 0
+        stdout = '[[["你好", "Hello", null, null, 1]]]'
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/curl" if name == "curl" else None)
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    provider = GoogleTranslationProvider("", "")
+
+    assert provider.translate_batch(["Hello"], "en", "zh") == ["你好"]
+    assert calls
+    assert "--http2" in calls[0][0]
+    assert calls[0][1]["shell"] is False
+
+
 def test_microsoft_provider_posts_translator_body_in_order(monkeypatch):
     captured = {}
 
@@ -262,7 +289,7 @@ def test_socket_translation_uses_server_segment_text():
         "start_transcription",
         {"mode": "local", "model": "fake", "language": "en", "sample_rate": 16000, "window_seconds": 0.2, "overlap_seconds": 0.01},
         callback=True,
-    )["status"] == "success"
+    )["status"] == "starting"
 
     import base64
     import struct

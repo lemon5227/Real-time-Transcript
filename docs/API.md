@@ -24,7 +24,7 @@ Returns non-sensitive configuration. It never includes transcription or translat
   "transcription_mode":"auto",
   "local_model":"small",
   "cloud":{"configured":false,"base_url":"","model":"","timeout_seconds":30},
-  "audio":{"max_queue":32,"window_seconds":3.0,"overlap_seconds":0.5},
+  "audio":{"max_queue":64,"window_seconds":3.0,"overlap_seconds":0.5},
   "translation":{"google":{"configured":false},"microsoft":{"configured":false,"region":""},"cloud_model":{"configured":false,"model":""},"timeout_seconds":20}
 }
 ```
@@ -47,7 +47,7 @@ Returns device, local path, cloud configuration state, audio defaults and transl
 {
   "local":{"available":true,"runtime":"cuda","ready_models":["small"],"device":{"kind":"nvidia","device":"cuda","runtime":"cuda","recommended_model":"small"},"recommended_model":"small"},
   "cloud":{"configured":false,"base_url":"","model":""},
-  "audio":{"sample_rate":16000,"max_queue":32,"window_seconds":3.0,"overlap_seconds":0.5},
+  "audio":{"sample_rate":16000,"max_queue":64,"window_seconds":3.0,"overlap_seconds":0.5},
   "translation":{"google":{"configured":false},"microsoft":{"configured":false,"region":""},"cloud_model":{"configured":false,"model":""},"timeout_seconds":20}
 }
 ```
@@ -64,11 +64,19 @@ Client payload:
 {"mode":"auto","model":"small","language":"en","sample_rate":48000,"enable_vad":true}
 ```
 
-`mode` is `auto`, `local` or `cloud`. The server normalizes incoming audio to 16 kHz. A successful acknowledgement and the `transcription_started` event have this shape:
+`mode` is `auto`, `local` or `cloud`. The server normalizes incoming audio to 16 kHz. The acknowledgement and `transcription_session_created` event are returned as soon as the session queue exists, before a local model finishes loading:
 
 ```json
-{"status":"success","session_id":"session-…","provider":"local","model":"small"}
+{"status":"starting","ready":false,"session_id":"session-…","provider":"local","model":"small"}
 ```
+
+Audio chunks may be sent immediately after this response. Once the provider is ready, the server emits `transcription_ready` with the actual provider and model:
+
+```json
+{"status":"ready","ready":true,"session_id":"session-…","provider":"mlx","model":"mlx-community/parakeet-tdt-0.6b-v3"}
+```
+
+The default audio queue holds 64 of the browser's approximately 0.5-second PCM chunks, providing about 30 seconds for model startup. If the queue remains full, the server emits `audio_backpressure` and drops the oldest pending chunk to preserve recency.
 
 On failure:
 

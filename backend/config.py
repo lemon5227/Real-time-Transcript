@@ -220,7 +220,7 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
             source.get("TRANSLATION_TIMEOUT_SECONDS", "20"), "TRANSLATION_TIMEOUT_SECONDS", 1.0
         ),
         audio_max_queue=_parse_int(
-            source.get("AUDIO_MAX_QUEUE", "32"), "AUDIO_MAX_QUEUE", 1
+            source.get("AUDIO_MAX_QUEUE", "64"), "AUDIO_MAX_QUEUE", 1
         ),
         audio_window_seconds=window_seconds,
         audio_overlap_seconds=overlap_seconds,
