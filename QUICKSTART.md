@@ -1,5 +1,26 @@
 # Quickstart
 
+## Fast path
+
+macOS/Linux:
+
+```bash
+./quickstart.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\quickstart.ps1
+```
+
+The launcher creates or reuses `.venv`, preserves an existing `.env`, and
+selects native MLX, local/CUDA, or cloud dependencies for the current device.
+Use `--mode local` or `--mode cloud` (PowerShell: `-Mode Local` or
+`-Mode Cloud`) to override automatic selection. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for Docker and Render one-click
+deployment.
+
 ## 1. Prepare the core app
 
 ```bash

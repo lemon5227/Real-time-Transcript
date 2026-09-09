@@ -36,6 +36,7 @@
 - Create: `render.yaml` — Render Blueprint for cloud-only deployment.
 - Modify: `README.zh-CN.md` — one-click native, Docker, and Render instructions.
 - Modify: `README.md` — matching English deployment entry points and runtime boundaries.
+- Modify: `QUICKSTART.md` — expose the one-click launcher before the manual setup path.
 - Create: `docs/DEPLOYMENT.md` — detailed platform matrix, environment variables, and troubleshooting.
 - Modify: `requirements-cloud.txt` — only if a cloud runtime dependency required by Docker is missing; keep Windows compatibility by installing Gunicorn in the Dockerfile rather than this cross-platform file.
 - Create: `tests/test_quickstart.py` — pure platform/profile selection and non-destructive bootstrap contract tests.
@@ -257,6 +258,7 @@ git commit -m "feat: add reproducible docker deployment"
 - Create: `docs/DEPLOYMENT.md`
 - Modify: `README.zh-CN.md`
 - Modify: `README.md`
+- Modify: `QUICKSTART.md`
 - Modify: `tests/test_deployment_files.py`
 
 **Interfaces:**
@@ -304,20 +306,24 @@ Include the explicit local Docker command, Render variable names, the warning th
 
 Add a “一键启动 / One-click deployment” section near quickstart instructions. Include the Render button, native commands, Docker cloud command, Docker local override command, the cloud API requirement, and a link to `docs/DEPLOYMENT.md`. State that the separated subtitle-generator repositories remain decoupled.
 
-- [ ] **Step 5: Add config and port troubleshooting**
+- [ ] **Step 5: Add the quickstart entry point**
+
+Add the native launcher commands to the top of `QUICKSTART.md`, before the manual virtual-environment steps, and link to `docs/DEPLOYMENT.md` for Docker and Render.
+
+- [ ] **Step 6: Add config and port troubleshooting**
 
 Document `TRANSCRIPT_PORT=5002 docker compose up --build` and explain that the browser uses `http://localhost:5002`. Explain that a cloud container needs `CLOUD_BASE_URL`, `CLOUD_API_KEY`, and `CLOUD_TRANSCRIPTION_MODEL` before transcription can start; the page may still open without them.
 
-- [ ] **Step 6: Validate docs and Blueprint statically**
+- [ ] **Step 7: Validate docs and Blueprint statically**
 
 Run: `PYTHONPATH=. pytest -q tests/test_deployment_files.py`
 
 Run a YAML parse check using the installed Python YAML parser when available; otherwise inspect the Render file with a small structure-aware check and report the limitation. Do not call the Render API or create an external service during repository tests.
 
-- [ ] **Step 7: Commit the Render/documentation unit**
+- [ ] **Step 8: Commit the Render/documentation unit**
 
 ```bash
-git add render.yaml docs/DEPLOYMENT.md README.zh-CN.md README.md tests/test_deployment_files.py
+git add render.yaml docs/DEPLOYMENT.md README.zh-CN.md README.md QUICKSTART.md tests/test_deployment_files.py
 git commit -m "docs: add render one-click deployment"
 ```
 
