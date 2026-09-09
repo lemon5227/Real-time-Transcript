@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: real-time-transcript
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRANSCRIPTION_MODE
+        value: cloud
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CLOUD_BASE_URL
+        sync: false
+      - key: CLOUD_API_KEY
+        sync: false
+      - key: CLOUD_TRANSCRIPTION_MODEL
+        sync: false

@@ -51,6 +51,45 @@ For development and tests:
 pip install -r requirements-dev.txt
 ```
 
+## One-click startup and deployment
+
+For native cross-platform setup, run the launcher from the repository root:
+
+```bash
+./quickstart.sh
+```
+
+It selects Apple Silicon MLX, a standard local runtime for machines where
+`nvidia-smi` succeeds, or cloud mode for other machines. Override the choice
+with `./quickstart.sh --mode local` or `./quickstart.sh --mode cloud`; on
+Windows use `.\quickstart.ps1 -Mode Local` or `.\quickstart.ps1 -Mode Cloud`.
+The launcher reuses `.venv` and `.env` and never prints or asks for API keys.
+
+For a reproducible Docker cloud container:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+For the explicit standard CPU local image:
+
+```bash
+TRANSCRIPT_DOCKERFILE=Dockerfile.local DOCKER_TRANSCRIPTION_MODE=local docker compose up --build
+```
+
+Docker on macOS cannot use the host’s Apple Metal; use native `quickstart.sh`
+for MLX. A cloud container requires the OpenAI-compatible
+`CLOUD_BASE_URL`, `CLOUD_API_KEY`, and `CLOUD_TRANSCRIPTION_MODEL` variables.
+
+Deploy a cloud instance from GitHub with Render:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/lemon5227/Real-time-Transcript)
+
+The Render service uses the lightweight cloud image and prompts for the three
+private cloud variables. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
+the platform matrix, port overrides, and troubleshooting.
+
 On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. Open the gear-shaped Settings button to inspect model readiness and pre-download local models before class; runtime-managed models remain available as a first-use fallback.
 
 ## Choose a runtime

@@ -28,3 +28,21 @@ def test_compose_selects_dockerfile_and_host_port_from_environment():
     assert "TRANSCRIPT_PORT" in content
     assert "HOST: 0.0.0.0" in content
     assert "TRANSCRIPTION_MODE: ${DOCKER_TRANSCRIPTION_MODE:-cloud}" in content
+
+
+def test_render_blueprint_is_cloud_only_and_has_health_check():
+    content = (ROOT / "render.yaml").read_text(encoding="utf-8")
+    assert "runtime: docker" in content
+    assert "dockerfilePath: ./Dockerfile" in content
+    assert "healthCheckPath: /api/health" in content
+    assert "TRANSCRIPTION_MODE" in content
+    assert "CLOUD_BASE_URL" in content
+    assert "CLOUD_API_KEY" in content
+    assert "CLOUD_TRANSCRIPTION_MODEL" in content
+
+
+def test_readme_contains_one_click_deploy_link_and_local_override():
+    content = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    assert "render.com/deploy?repo=https://github.com/lemon5227/Real-time-Transcript" in content
+    assert "TRANSCRIPT_DOCKERFILE=Dockerfile.local" in content
+    assert "DOCKER_TRANSCRIPTION_MODE=local" in content

@@ -16,6 +16,35 @@ cp .env.example .env
 
 课堂页：`http://127.0.0.1:5001/` · 复习页：`http://127.0.0.1:5001/review`
 
+## 一键启动与部署
+
+本机按设备能力自动准备环境：
+
+```bash
+./quickstart.sh
+```
+
+Apple Silicon Mac 会安装 MLX，能正常执行 `nvidia-smi` 的 Windows/Linux 设备会安装标准本地运行时，其他设备默认准备云端运行时。需要强制指定时使用 `./quickstart.sh --mode local` 或 `./quickstart.sh --mode cloud`；Windows PowerShell 对应 `.\quickstart.ps1 -Mode Local`。启动器会复用 `.venv` 和 `.env`，不会覆盖现有配置，也不会询问或打印 API Key。
+
+Docker 默认启动轻量云端容器：
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+如果希望在 Docker 中使用标准 CPU 本地模型：
+
+```bash
+TRANSCRIPT_DOCKERFILE=Dockerfile.local DOCKER_TRANSCRIPTION_MODE=local docker compose up --build
+```
+
+Mac 的 MLX 请使用原生启动，Docker 不能直接使用宿主机 Metal。需要云端访问时，也可以点击下面的按钮部署到 Render；部署时必须填写自己的 `CLOUD_BASE_URL`、`CLOUD_API_KEY` 和 `CLOUD_TRANSCRIPTION_MODEL`：
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/lemon5227/Real-time-Transcript)
+
+端口占用时可以使用 `TRANSCRIPT_PORT=5002 docker compose up --build`，然后打开 `http://localhost:5002/`。完整平台说明见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
+
 ## 隐私
 
 原声默认按 10 秒片段保存在当前浏览器本机，云端转录只会把实时处理所需的音频窗口发送到 `.env` 中配置的服务，不建立云端录音归档。翻译是独立的文本路径：可选 Google Cloud 或 Microsoft 做快速翻译，也可使用 Ollama/LM Studio 等 OpenAI-compatible 本地服务，或使用云端模型做精确翻译；翻译不会上传原声。API Key 只在后端环境变量中保存。课堂右侧的“更多设置”可以查看模型状态，并在上课前提前下载本地模型。详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
