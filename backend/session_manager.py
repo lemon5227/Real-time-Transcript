@@ -207,6 +207,11 @@ class SessionManager:
                     else state.config.overlap_seconds
                 ),
             )
+            state.voice_gate = VoiceGate(
+                enabled=state.config.enable_vad,
+                threshold=state.config.silence_rms_threshold,
+            )
+            state.glossary = Glossary(state.config.glossary)
             state.startup_event.set()
             self._emit(
                 state.sid,
@@ -279,7 +284,12 @@ class SessionManager:
                 state.finished_event.set()
 
     def _process_window(self, state: _SessionState, window: AudioWindow) -> None:
-        segments = state.provider.push(window.audio)
+        audio = window.audio
+        if state.voice_gate is not None:
+            # Silence is passed on as zeros so the provider timeline still covers
+            # the recorded span and captions keep their position.
+            audio = state.voice_gate.filter(audio)
+        segments = state.provider.push(audio)
         # Stateful providers such as Parakeet already maintain a continuous
         # timeline. Windowed providers return offsets relative to this window.
         window_origin_ms = (

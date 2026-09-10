@@ -61,10 +61,12 @@ Connect to the default namespace, then use acknowledgements for control events. 
 Client payload:
 
 ```json
-{"mode":"auto","model":"small","language":"en","sample_rate":48000,"enable_vad":true}
+{"mode":"auto","model":"small","language":"en","sample_rate":48000,"enable_vad":true,"glossary":["gradient descent","eigenvalue"]}
 ```
 
-`mode` is `auto`, `local` or `cloud`. The server normalizes incoming audio to 16 kHz. The acknowledgement and `transcription_session_created` event are returned as soon as the session queue exists, before a local model finishes loading:
+`mode` is `auto`, `local` or `cloud`. `enable_vad` hands near-silent windows to the provider as digital silence, so a quiet room stops costing inference without moving the transcript timeline. `glossary` is an optional list of course terms: the model receives it as a vocabulary hint where the runtime supports one, and afterwards a listed term replaces a near-miss spelling (`gradien` → `gradient`). When the page sends no list, `AUDIO_GLOSSARY` from the backend environment is used.
+
+The server normalizes incoming audio to 16 kHz. The acknowledgement and `transcription_session_created` event are returned as soon as the session queue exists, before a local model finishes loading:
 
 ```json
 {"status":"starting","ready":false,"session_id":"session-…","provider":"local","model":"small"}

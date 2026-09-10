@@ -2,7 +2,9 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple
 
+from .glossary import parse_glossary
 from .models import SUPPORTED_MODES
+from .voice_gate import normalize_threshold
 
 
 def _parse_bool(value: str, name: str) -> bool:
@@ -63,6 +65,8 @@ class AppConfig:
     audio_max_queue: int
     audio_window_seconds: float
     audio_overlap_seconds: float
+    audio_vad_threshold: float
+    audio_glossary: Tuple[str, ...]
 
     @property
     def cloud_configured(self) -> bool:
@@ -112,6 +116,8 @@ class AppConfig:
                 "max_queue": self.audio_max_queue,
                 "window_seconds": self.audio_window_seconds,
                 "overlap_seconds": self.audio_overlap_seconds,
+                "vad_threshold": self.audio_vad_threshold,
+                "glossary": list(self.audio_glossary),
             },
             "translation": {
                 "google": {
@@ -227,4 +233,6 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         ),
         audio_window_seconds=window_seconds,
         audio_overlap_seconds=overlap_seconds,
+        audio_vad_threshold=normalize_threshold(source.get("AUDIO_VAD_THRESHOLD")),
+        audio_glossary=parse_glossary(source.get("AUDIO_GLOSSARY", "")),
     )

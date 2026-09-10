@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from .glossary import parse_glossary
+from .voice_gate import DEFAULT_SILENCE_RMS, normalize_threshold
+
 SUPPORTED_SAMPLE_RATES: Tuple[int, ...] = (8000, 16000, 22050, 32000, 44100, 48000)
 SUPPORTED_MODES: Tuple[str, ...] = ("auto", "local", "cloud")
 
@@ -16,6 +19,8 @@ class SessionConfig:
     overlap_seconds: float = 0.5
     max_queue: int = 64
     stop_timeout_seconds: float = 5.0
+    silence_rms_threshold: float = DEFAULT_SILENCE_RMS
+    glossary: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.mode not in SUPPORTED_MODES:
@@ -32,6 +37,10 @@ class SessionConfig:
             raise ValueError("max_queue must be positive")
         if self.stop_timeout_seconds <= 0:
             raise ValueError("stop_timeout_seconds must be positive")
+        object.__setattr__(
+            self, "silence_rms_threshold", normalize_threshold(self.silence_rms_threshold)
+        )
+        object.__setattr__(self, "glossary", parse_glossary(self.glossary))
 
 
 @dataclass(frozen=True)
