@@ -8,6 +8,7 @@
 
 - Realtime microphone transcription for English lectures and other supported languages; the active local runtime is selected by device.
 - Browser audio is normalized to mono 16 kHz; common 44.1/48 kHz microphones are accepted.
+- Rooms that go quiet stop costing inference: audio below `AUDIO_VAD_THRESHOLD` is handed to the model as digital silence, so battery and latency are spent on speech while the recording timeline stays exact.
 - Apple Silicon Mac local mode uses the MLX Parakeet TDT v3 path for English and European-language lectures.
 - Windows, Linux and Intel Mac use the standard Whisper path; NVIDIA devices use CUDA automatically, while CPU laptops use CPU inference.
 - Cloud mode sends short audio windows to the endpoint configured by the user, which makes the app practical on thin laptops.
@@ -49,6 +50,8 @@ For development and tests:
 
 ```bash
 pip install -r requirements-dev.txt
+pytest -q          # backend and browser-contract tests; needs node on PATH
+ruff check .
 ```
 
 ## One-click startup and deployment

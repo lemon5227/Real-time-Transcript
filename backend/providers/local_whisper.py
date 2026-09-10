@@ -4,6 +4,7 @@ from typing import Callable, List, Optional
 import numpy as np
 
 from ..device import DeviceProfile, get_device_profile
+from ..glossary import Glossary
 from ..models import SessionConfig, TranscriptSegment
 from .base import ProviderError
 
@@ -95,12 +96,23 @@ class LocalWhisperProvider:
     def _compute_type(self) -> str:
         return "float16" if self.device == "cuda" else "int8"
 
+    def _initial_prompt(self) -> Optional[str]:
+        """Hint Whisper with the course vocabulary the user listed."""
+        if self._config is None:
+            return None
+        prompt = Glossary(self._config.glossary).prompt
+        return prompt or None
+
     def push(self, audio: np.ndarray) -> List[TranscriptSegment]:
         if self._model is None or self._config is None:
             raise ProviderError("LOCAL_SESSION_NOT_STARTED", "本地 provider 尚未启动")
         try:
             if self._backend == "fake":
-                raw_segments = self._model.transcribe(audio, language=self._config.language)
+                raw_segments = self._model.transcribe(
+                    audio,
+                    language=self._config.language,
+                    initial_prompt=self._initial_prompt(),
+                )
                 if isinstance(raw_segments, dict):
                     text = raw_segments.get("text", "")
                     raw_segments = [{"text": text, "start": 0.0, "end": len(audio) / 16000}]
@@ -112,6 +124,7 @@ class LocalWhisperProvider:
                     language=self._config.language,
                     beam_size=5,
                     vad_filter=self._config.enable_vad,
+                    initial_prompt=self._initial_prompt(),
                 )
                 raw_segments = list(raw_segments)
             else:
@@ -121,6 +134,7 @@ class LocalWhisperProvider:
                     # MPS float16 can produce NaN logits on Apple Silicon for
                     # some Whisper checkpoints; CUDA is the only safe fp16 path.
                     fp16=self.device == "cuda",
+                    initial_prompt=self._initial_prompt(),
                 )
                 raw_segments = result.get("segments", [])
         except Exception as exc:

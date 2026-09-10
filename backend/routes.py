@@ -228,6 +228,8 @@ def register_socket_handlers(socketio: SocketIO) -> None:
                 window_seconds=float(payload.get("window_seconds") or config.audio_window_seconds),
                 overlap_seconds=float(payload.get("overlap_seconds") or config.audio_overlap_seconds),
                 max_queue=config.audio_max_queue,
+                silence_rms_threshold=config.audio_vad_threshold,
+                glossary=payload.get("glossary") or config.audio_glossary,
             )
             result = manager.start(flask_request.sid, session_config)
         except (ProviderError, ValueError, TypeError) as exc:
