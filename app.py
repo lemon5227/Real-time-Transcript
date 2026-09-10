@@ -2,7 +2,6 @@
 
 from backend import create_app, socketio
 
-
 app = create_app()
 
 
@@ -12,4 +11,5 @@ if __name__ == "__main__":
         host=app.config["APP_HOST"],
         port=app.config["APP_PORT"],
         debug=False,
+        allow_unsafe_werkzeug=True,
     )

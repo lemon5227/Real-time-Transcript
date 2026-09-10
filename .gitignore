@@ -73,3 +73,8 @@ temp/
 # HuggingFace cache
 .cache/
 transformers_cache/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/

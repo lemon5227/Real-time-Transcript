@@ -46,3 +46,15 @@ def test_readme_contains_one_click_deploy_link_and_local_override():
     assert "render.com/deploy?repo=https://github.com/lemon5227/Real-time-Transcript" in content
     assert "TRANSCRIPT_DOCKERFILE=Dockerfile.local" in content
     assert "DOCKER_TRANSCRIPTION_MODE=local" in content
+
+def test_pytest_resolves_the_backend_package_from_the_repository_root():
+    content = (ROOT / "pytest.ini").read_text(encoding="utf-8")
+    assert "pythonpath = ." in content
+
+
+def test_ci_runs_lint_tests_and_browser_javascript():
+    content = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "requirements-dev.txt" in content
+    assert "ruff check ." in content
+    assert "pytest -q" in content
+    assert "node --check" in content
