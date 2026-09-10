@@ -228,6 +228,7 @@
         model: modelSelect.value,
         language: $("#language-select").value,
         courseTitle: $("#course-title").value.trim(),
+        glossary: $("#glossary-input").value.trim(),
         deviceId: state.selectedDeviceId,
         saveAudio: state.saveAudio,
         translationMode: state.translationMode,
@@ -244,6 +245,7 @@
     if (saved.model && modelSelect.querySelector('[value="' + saved.model + '"]')) modelSelect.value = saved.model;
     if (saved.language && $("#language-select").querySelector('[value="' + saved.language + '"]')) $("#language-select").value = saved.language;
     if (saved.courseTitle) $("#course-title").value = saved.courseTitle;
+    if (saved.glossary) $("#glossary-input").value = saved.glossary;
     state.saveAudio = saved.saveAudio !== false;
     $("#save-audio").checked = state.saveAudio;
     if (["off", "fast", "precise", "auto"].indexOf(saved.translationMode) !== -1) state.translationMode = saved.translationMode;
@@ -1076,6 +1078,12 @@
     state.pendingAudioSeconds = 0;
   }
 
+  function parseGlossaryInput(value) {
+    return String(value || "").split(/[,;\n，、|]/).map(function (term) { return term.trim(); }).filter(function (term, index, all) {
+      return term && all.indexOf(term) === index;
+    }).slice(0, 50);
+  }
+
   function queuePendingAudio(buffer, sampleRate) {
     if (!buffer || !buffer.byteLength) return;
     var rate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
@@ -1393,6 +1401,10 @@
       await refreshMicrophones();
       if (state.mode === "auto" && !localModelUsable(model)) outgoingMode = "cloud";
       var payload = { mode: outgoingMode, model: modelSelect.value, language: $("#language-select").value, sample_rate: 16000, enable_vad: true };
+      // Course vocabulary steers the model before inference and repairs near-miss
+      // spellings afterwards, so a lecturer's name stays spelled the same way.
+      var glossaryTerms = parseGlossaryInput($("#glossary-input").value);
+      if (glossaryTerms.length) payload.glossary = glossaryTerms;
       state.sequence = 0;
       state.audioBuffer.reset();
       clearPendingAudio();
@@ -1712,6 +1724,7 @@
   $("#model-select").addEventListener("change", function () { savePreferences(); renderReadiness(); renderModelManagement(); syncQuickSettings(); });
   $("#language-select").addEventListener("change", function () { savePreferences(); renderReadiness(); renderModelManagement(); syncQuickSettings(); });
   $("#course-title").addEventListener("input", savePreferences);
+  $("#glossary-input").addEventListener("input", savePreferences);
   $("#error-action").addEventListener("click", function () {
     var action = this.dataset.action;
     if (action === "download-model") downloadModel(state.pendingModelId || modelSelect.value);

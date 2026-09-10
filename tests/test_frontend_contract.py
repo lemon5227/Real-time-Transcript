@@ -233,6 +233,33 @@ def test_live_workbench_preserves_follow_mode_and_translates_existing_segments()
     assert "已开启 · 下一句字幕会自动翻译" in javascript
 
 
+
+def test_live_workbench_stamps_audio_chunks_with_the_recording_clock():
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+
+    # Every audio chunk carries its capture position so the backend can keep
+    # captions aligned with the saved recording.
+    for hook in [
+        "captureStartedAtMs",
+        "captureOffsetMs",
+        "payload.offset_ms",
+        "startedAtMs: state.captureStartedAtMs",
+    ]:
+        assert hook in javascript
+    assert "state.socket.emit(\"audio_chunk\", payload)" in javascript
+
+
+def test_live_workbench_exposes_a_course_glossary():
+    client = create_app({}).test_client()
+    html = client.get("/").get_data(as_text=True)
+    javascript = client.get("/static/app.js").get_data(as_text=True)
+
+    assert 'id="glossary-input"' in html
+    assert "课程词汇" in html
+    for hook in ["glossary-input", "parseGlossaryInput", "payload.glossary", "glossary: $(\"#glossary-input\")"]:
+        assert hook in javascript
+
+
 def test_live_workbench_follow_does_not_pause_on_programmatic_scroll():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
 
