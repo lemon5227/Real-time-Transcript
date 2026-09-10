@@ -24,13 +24,13 @@ class FakeResponse:
 def test_google_provider_posts_ordered_contents_without_leaking_key(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers, json, timeout):
-        captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
-        return FakeResponse(200, {"translations": [{"translatedText": "你好"}, {"translatedText": "世界"}]})
+    def fake_post(url, headers, json, params, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "params": params, "timeout": timeout})
+        return FakeResponse(200, {"data": {"translations": [{"translatedText": "你好"}, {"translatedText": "世界"}]}})
 
     monkeypatch.setattr("requests.post", fake_post)
     provider = GoogleTranslationProvider(
-        project_id="project-1",
+        project_id="",
         api_key="google-secret",
         timeout_seconds=7,
     )
@@ -38,11 +38,22 @@ def test_google_provider_posts_ordered_contents_without_leaking_key(monkeypatch)
     result = provider.translate_batch(["Hello", "world"], "en", "zh-CN")
 
     assert result == ["你好", "世界"]
-    assert captured["json"]["contents"] == ["Hello", "world"]
-    assert captured["json"]["sourceLanguageCode"] == "en"
-    assert captured["json"]["targetLanguageCode"] == "zh-CN"
-    assert captured["headers"]["x-goog-api-key"] == "google-secret"
+    assert captured["url"] == "https://translation.googleapis.com/language/translate/v2"
+    assert captured["params"] == {"key": "google-secret"}
+    assert captured["json"] == {
+        "q": ["Hello", "world"],
+        "source": "en",
+        "target": "zh-CN",
+        "format": "text",
+    }
+    assert captured["headers"] == {"Content-Type": "application/json"}
     assert "google-secret" not in str(provider.last_error if hasattr(provider, "last_error") else "")
+
+
+def test_google_configured_with_api_key_only():
+    config = load_config({"TRANSLATION_GOOGLE_API_KEY": "google-secret"})
+
+    assert config.translation_google_configured is True
 
 
 def test_google_provider_has_best_effort_public_fallback_without_key(monkeypatch):

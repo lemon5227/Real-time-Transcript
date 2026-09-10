@@ -74,7 +74,10 @@ class AppConfig:
 
     @property
     def translation_google_configured(self) -> bool:
-        return bool(self.translation_google_project_id and self.translation_google_api_key)
+        # Cloud Translation Basic (v2) authenticates with the API key. The
+        # project is useful for console/billing context but is not required
+        # in the request itself.
+        return bool(self.translation_google_api_key)
 
     @property
     def translation_microsoft_configured(self) -> bool:

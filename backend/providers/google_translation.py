@@ -4,7 +4,6 @@ import json
 import shutil
 import subprocess
 from typing import List, Sequence
-from urllib.parse import quote
 
 from ..translation import map_translation_response_error, validate_translation_batch
 from .base import ProviderError
@@ -39,27 +38,24 @@ class GoogleTranslationProvider:
         self, texts: Sequence[str], source_language: str, target_language: str
     ) -> List[str]:
         values = validate_translation_batch(texts, source_language, target_language)
-        if not self.project_id or not self.api_key:
+        if not self.api_key:
             return self._translate_public(values, source_language, target_language)
         if requests is None:
             raise ProviderError("TRANSLATION_DEPENDENCY_MISSING", "翻译云端依赖不可用")
         http = self._http or requests
-        url = (
-            "https://translation.googleapis.com/v3/projects/"
-            + quote(self.project_id, safe="")
-            + "/locations/"
-            + quote(self.location, safe="")
-            + ":translateText"
-        )
+        # API keys are supported by Cloud Translation Basic (v2), while the
+        # Advanced v3 REST API requires OAuth/service-account credentials.
+        url = "https://translation.googleapis.com/language/translate/v2"
         try:
             response = http.post(
                 url,
-                headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+                headers={"Content-Type": "application/json"},
+                params={"key": self.api_key},
                 json={
-                    "sourceLanguageCode": source_language,
-                    "targetLanguageCode": target_language,
-                    "contents": values,
-                    "mimeType": "text/plain",
+                    "q": values,
+                    "source": source_language,
+                    "target": target_language,
+                    "format": "text",
                 },
                 timeout=self.timeout_seconds,
             )
@@ -73,7 +69,7 @@ class GoogleTranslationProvider:
             raise map_translation_response_error(response.status_code)
         try:
             payload = response.json()
-            translations = payload["translations"]
+            translations = payload["data"]["translations"]
             result = [str(item["translatedText"]).strip() for item in translations]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ProviderError("TRANSLATION_INVALID_RESPONSE", "Google 翻译返回格式无效") from exc

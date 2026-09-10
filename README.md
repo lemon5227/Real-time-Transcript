@@ -125,6 +125,30 @@ The browser never receives `CLOUD_API_KEY`. The UI makes the current path visibl
 
 Real-time translation is off by default. When enabled, a best-effort Google public path can work without a key; Google Cloud Translation or Microsoft Translator can provide more stable quick text translation when configured. After class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Precise local translation can use an OpenAI-compatible Ollama/LM Studio endpoint; cloud precise translation uses the configured OpenAI-compatible endpoint. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
 
+### Optional Google and Microsoft translation keys
+
+Google Cloud Translation Basic currently lists the first 500,000 characters per month as free, while Azure Translator’s F0 tier currently lists 2,000,000 characters per month free. Both limits, billing requirements and regional availability are controlled by the providers; check their official pricing pages before relying on them for a course. Google’s no-key public path is best-effort only and can be rate-limited.
+
+Create a Google Cloud project, enable Cloud Translation API, create an API key under **APIs & Services → Credentials**, and restrict the key to Cloud Translation. The app uses the Basic v2 API-key flow; the project ID is optional in the app but useful for identifying the billing project:
+
+```dotenv
+TRANSLATION_GOOGLE_PROJECT_ID=your-project-id
+TRANSLATION_GOOGLE_API_KEY=your-google-key
+TRANSLATION_GOOGLE_LOCATION=global
+```
+
+See [Google Cloud Translation setup](https://docs.cloud.google.com/translate/docs/setup), [authentication](https://docs.cloud.google.com/translate/docs/authentication) and [pricing](https://cloud.google.com/products/translate/pricing).
+
+For Microsoft, create a Translator resource in the [Azure Portal](https://portal.azure.com/), choose the F0 free tier when available, then open **Keys and Endpoint** after deployment:
+
+```dotenv
+TRANSLATION_MICROSOFT_ENDPOINT=https://api.cognitive.microsofttranslator.com
+TRANSLATION_MICROSOFT_API_KEY=your-microsoft-key
+TRANSLATION_MICROSOFT_REGION=
+```
+
+Use a region only when your resource uses a regional endpoint. See [Microsoft resource setup](https://learn.microsoft.com/azure/ai-services/translator/how-to/create-translator-resource), [pricing](https://azure.microsoft.com/pricing/details/cognitive-services/translator/) and [service limits](https://learn.microsoft.com/azure/ai-services/translator/service-limits). Keep both providers’ keys in the backend `.env`; never put them in browser code or commit them.
+
 ## Start
 
 ```bash

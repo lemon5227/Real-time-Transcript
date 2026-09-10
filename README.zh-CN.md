@@ -45,6 +45,46 @@ Mac 的 MLX 请使用原生启动，Docker 不能直接使用宿主机 Metal。�
 
 端口占用时可以使用 `TRANSCRIPT_PORT=5002 docker compose up --build`，然后打开 `http://localhost:5002/`。完整平台说明见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
+## 翻译 API（可选）
+
+当前翻译已经接入 Google 和 Microsoft 两个快速翻译服务。打开右侧设置中的“翻译”，选择“快速翻译”，再选择对应服务即可。
+
+### Google Cloud Translation
+
+1. 打开 [Google Cloud Translation 设置](https://docs.cloud.google.com/translate/docs/setup)，创建或选择一个 Google Cloud 项目。
+2. 启用 **Cloud Translation API**，并按 Google Cloud 要求配置结算账户。
+3. 进入 **API 和服务 → 凭据 → 创建凭据 → API 密钥**。
+4. 建议把 API 密钥限制为只能调用 Cloud Translation API，并复制项目 ID 和 API 密钥。
+
+Google 官方价格页当前列出标准文本翻译每月前 500,000 个字符免费，超出后再计费；免费额度和账户资格以官方价格页为准。普通 API 密钥应使用项目的 Basic v2 接口，项目 ID 在本项目中可选但建议保留：
+
+```dotenv
+TRANSLATION_GOOGLE_PROJECT_ID=your-project-id
+TRANSLATION_GOOGLE_API_KEY=your-google-api-key
+TRANSLATION_GOOGLE_LOCATION=global
+```
+
+官方入口：[获取凭据](https://docs.cloud.google.com/translate/docs/authentication) · [价格](https://cloud.google.com/products/translate/pricing)
+
+### Microsoft Translator
+
+1. 打开 [Azure Portal](https://portal.azure.com/)，创建 **Translator** 资源。
+2. 选择订阅、资源组、区域和名称；个人测试可选择 **F0 免费层**（若所在区域/账户可用）。
+3. 部署完成后进入资源 → **资源管理 → 密钥和终结点（Keys and Endpoint）**。
+4. 复制 Key 以及 Endpoint；使用 Global endpoint 时保持默认地址即可。若使用区域终结点，再填写资源区域。
+
+Azure 官方价格页当前列出 F0 每月 2,000,000 个字符免费；服务本身还会按订阅层级限制吞吐，超过免费额度或限制后需要升级/等待。配置如下：
+
+```dotenv
+TRANSLATION_MICROSOFT_ENDPOINT=https://api.cognitive.microsofttranslator.com
+TRANSLATION_MICROSOFT_API_KEY=your-microsoft-key
+TRANSLATION_MICROSOFT_REGION=
+```
+
+官方入口：[创建 Translator 资源并获取 Key](https://learn.microsoft.com/azure/ai-services/translator/how-to/create-translator-resource) · [价格](https://azure.microsoft.com/pricing/details/cognitive-services/translator/) · [服务限制](https://learn.microsoft.com/azure/ai-services/translator/service-limits)
+
+两家的 Key 都只放在后端 `.env`，不要粘贴到浏览器前端或提交到 GitHub。Google 无 Key 公共通道仍保留作临时兜底，但可能限流；要上课稳定使用，建议配置 Azure F0 或 Google Cloud 官方 Key。
+
 ## 隐私
 
 原声默认按 10 秒片段保存在当前浏览器本机，云端转录只会把实时处理所需的音频窗口发送到 `.env` 中配置的服务，不建立云端录音归档。翻译是独立的文本路径：可选 Google Cloud 或 Microsoft 做快速翻译，也可使用 Ollama/LM Studio 等 OpenAI-compatible 本地服务，或使用云端模型做精确翻译；翻译不会上传原声。API Key 只在后端环境变量中保存。课堂右侧的“更多设置”可以查看模型状态，并在上课前提前下载本地模型。详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。

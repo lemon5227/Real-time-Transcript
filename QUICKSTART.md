@@ -69,6 +69,8 @@ TRANSLATION_MICROSOFT_REGION=your-resource-region
 
 Use the Google or Microsoft selector in the classroom page for quick translation. Google has a best-effort public path that works without a key; configure the official Google or Microsoft variables when you need a more stable service. For precise local translation, run an OpenAI-compatible local server such as Ollama or LM Studio and set `TRANSLATION_LOCAL_BASE_URL` and `TRANSLATION_LOCAL_MODEL`; an API key is optional for local servers. For cloud precise translation, configure `TRANSLATION_CLOUD_BASE_URL`, `TRANSLATION_CLOUD_API_KEY` and `TRANSLATION_CLOUD_MODEL`. Keys remain in the backend `.env` and translation sends text only, never the saved original audio.
 
+Google Cloud Translation Basic currently has a monthly free allowance listed by Google, and Azure Translator F0 currently lists 2 million characters per month free. Both require provider accounts and may require billing setup. Follow the detailed [translation API setup in the Chinese README](README.zh-CN.md#翻译-api-可选) before class; the Google API-key path uses Basic v2, not Advanced v3.
+
 ## 3. Use it in class
 
 1. Open `http://127.0.0.1:5001/`.
