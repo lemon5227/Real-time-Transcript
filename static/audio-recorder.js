@@ -96,7 +96,7 @@
       try { recorder = new RecorderClass(config.stream, { mimeType: mimeType }); } catch (caught) { state = "failed"; return Promise.reject(caught); }
       recorder.ondataavailable = function (event) { enqueueChunk(event && event.data); };
       recorder.onerror = function (event) { writeQueue = writeQueue.catch(function () {}).then(function () { throw event && event.error ? event.error : createError("原声录音发生错误", "AUDIO_RECORDING_FAILED"); }); };
-      startedAtMs = now();
+      startedAtMs = Number(config.startedAtMs) > 0 ? Number(config.startedAtMs) : now();
       lastEndMs = 0;
       sequence = 0;
       return repository.createRecording({ sessionId: sessionId, mimeType: mimeType, extension: extensionForMime(mimeType), startedAt: new Date().toISOString() }).then(function (created) {

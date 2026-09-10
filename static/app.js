@@ -50,6 +50,7 @@
     liveSegment: null,
     liveArticle: null,
     sessionStartedAt: null,
+    captureStartedAtMs: null,
     timer: null,
     capabilities: null,
     models: [],
@@ -1084,11 +1085,20 @@
     }).slice(0, 50);
   }
 
-  function queuePendingAudio(buffer, sampleRate) {
+  function captureNow() {
+    return window.performance && typeof window.performance.now === "function" ? window.performance.now() : Date.now();
+  }
+
+  function captureOffsetMs() {
+    if (!state.captureStartedAtMs) return null;
+    return Math.max(0, Math.round(captureNow() - state.captureStartedAtMs));
+  }
+
+  function queuePendingAudio(buffer, sampleRate, offsetMs) {
     if (!buffer || !buffer.byteLength) return;
     var rate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
     var durationSeconds = buffer.byteLength / 2 / rate;
-    state.pendingAudio.push({ buffer: buffer, sampleRate: rate, durationSeconds: durationSeconds });
+    state.pendingAudio.push({ buffer: buffer, sampleRate: rate, durationSeconds: durationSeconds, offsetMs: offsetMs });
     state.pendingAudioSeconds += durationSeconds;
     var droppedSeconds = 0;
     while (state.pendingAudioSeconds > MAX_PENDING_AUDIO_SECONDS && state.pendingAudio.length) {
@@ -1101,9 +1111,13 @@
     }
   }
 
-  function emitAudioBuffer(buffer, sampleRate) {
+  function emitAudioBuffer(buffer, sampleRate, offsetMs) {
     if (!state.recording || !state.socket || !state.connected || !state.sessionId || state.transcriptionFailed || !buffer || !buffer.byteLength) return false;
-    state.socket.emit("audio_chunk", { audio: encodeBase64(buffer), sample_rate: sampleRate || (state.context ? state.context.sampleRate : 16000), sequence: state.sequence++ });
+    var payload = { audio: encodeBase64(buffer), sample_rate: sampleRate || (state.context ? state.context.sampleRate : 16000), sequence: state.sequence++ };
+    // Points the backend at this chunk's position on the recording clock, so
+    // captions stay aligned with the saved audio even when audio was dropped.
+    if (typeof offsetMs === "number" && isFinite(offsetMs) && offsetMs >= 0) payload.offset_ms = Math.round(offsetMs);
+    state.socket.emit("audio_chunk", payload);
     return true;
   }
 
@@ -1111,8 +1125,9 @@
     if ((!state.recording && !state.starting) || !buffer || !buffer.byteLength) return;
     if (state.transcriptionFailed) return;
     var sampleRate = state.context ? state.context.sampleRate : 16000;
-    state.audioBuffer.push(buffer, sampleRate).forEach(function (chunk) {
-      if (!emitAudioBuffer(chunk, sampleRate)) queuePendingAudio(chunk, sampleRate);
+    var offsetMs = captureOffsetMs();
+    state.audioBuffer.push(buffer, sampleRate, offsetMs).forEach(function (chunk) {
+      if (!emitAudioBuffer(chunk.buffer, sampleRate, chunk.offsetMs)) queuePendingAudio(chunk.buffer, sampleRate, chunk.offsetMs);
     });
   }
 
@@ -1125,12 +1140,12 @@
       return;
     }
     if (!state.sessionId) {
-      pending.forEach(function (item) { queuePendingAudio(item.buffer, item.sampleRate); });
-      if (tail) queuePendingAudio(tail, state.context ? state.context.sampleRate : 16000);
+      pending.forEach(function (item) { queuePendingAudio(item.buffer, item.sampleRate, item.offsetMs); });
+      if (tail) queuePendingAudio(tail.buffer, state.context ? state.context.sampleRate : 16000, tail.offsetMs);
       return;
     }
-    pending.forEach(function (item) { emitAudioBuffer(item.buffer, item.sampleRate); });
-    if (tail) emitAudioBuffer(tail, state.context ? state.context.sampleRate : 16000);
+    pending.forEach(function (item) { emitAudioBuffer(item.buffer, item.sampleRate, item.offsetMs); });
+    if (tail) emitAudioBuffer(tail.buffer, state.context ? state.context.sampleRate : 16000, tail.offsetMs);
   }
 
   function floatToPcm16(floatArray) {
@@ -1351,6 +1366,7 @@
       state.transcriptionReady = false;
       state.transcriptionFailed = false;
       state.audioBuffer.reset();
+      state.captureStartedAtMs = null;
       clearPendingAudio();
       var audioMessage = !state.saveAudio ? "字幕已保存" : audioManifest && audioManifest.status === "ready" ? "字幕和原声已保存" : audioManifest ? "字幕已保存，原声部分保存" : "字幕已保存，原声未保存";
       setAppPhase("saved", "本次听课已保存", audioMessage + " · 可以前往课后复习");
@@ -1408,6 +1424,7 @@
       state.sequence = 0;
       state.audioBuffer.reset();
       clearPendingAudio();
+      state.captureStartedAtMs = null;
       state.sessionStartedAt = Date.now();
       state.sessionId = null;
       state.transcriptionReady = false;
@@ -1433,19 +1450,24 @@
         try {
           setRecordingUi(true);
           await beginCapture();
+          // One capture clock for both the transcript and the saved audio, so a
+          // caption timestamp always points at the same moment in the recording.
+          state.captureStartedAtMs = captureNow();
           flushPendingAudio();
           if (state.saveAudio) {
             state.audioRecorder = window.EchoAudioRecorder.create({
               stream: state.stream,
               sessionId: state.sessionId,
               repository: window.EchoAudioRepository,
-              now: window.performance && typeof window.performance.now === "function" ? window.performance.now.bind(window.performance) : Date.now
+              now: window.performance && typeof window.performance.now === "function" ? window.performance.now.bind(window.performance) : Date.now,
+              startedAtMs: state.captureStartedAtMs
             });
             state.audioManifest = await state.audioRecorder.start();
           }
         } catch (captureError) {
           setRecordingUi(false);
           state.audioBuffer.reset();
+          state.captureStartedAtMs = null;
           clearPendingAudio();
           releaseCapture();
           state.audioRecorder = null;

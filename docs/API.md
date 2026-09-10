@@ -89,10 +89,14 @@ On failure:
 Client payload:
 
 ```json
-{"audio":"<base64 PCM16 little-endian mono>","sample_rate":48000,"sequence":12}
+{"audio":"<base64 PCM16 little-endian mono>","sample_rate":48000,"sequence":12,"offset_ms":8400}
 ```
 
-`sequence` must increase for every chunk. The server bounds the session queue and rejects malformed or oversized payloads. Success acknowledgement:
+`sequence` must increase for every chunk. The server bounds the session queue and rejects malformed or oversized payloads.
+
+`offset_ms` is optional. It marks where the first sample of the chunk sits on the browser capture clock, measured from the moment recording started. The backend uses it to keep transcript timestamps on the recording timeline: the first chunk fixes the recording origin when capture began before the model was ready, and audio dropped under backpressure still consumes its share of recording time. Without it, segment timestamps fall back to the provider-relative timeline.
+
+Success acknowledgement:
 
 ```json
 {"status":"accepted"}

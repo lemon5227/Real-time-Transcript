@@ -28,6 +28,16 @@ def _model_matches_runtime(model: Mapping[str, object], runtime: str) -> bool:
     return True
 
 
+def _optional_int(value: object) -> Optional[int]:
+    """Read an optional integer field without rejecting the whole audio chunk."""
+    if value is None:
+        return None
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _translation_error_result(exc: Exception) -> dict:
     if isinstance(exc, ProviderError):
         error = exc.to_dict()
@@ -238,6 +248,7 @@ def register_socket_handlers(socketio: SocketIO) -> None:
                 encoded_audio=str(payload.get("audio") or ""),
                 sample_rate=int(payload.get("sample_rate") or 16000),
                 sequence=int(payload.get("sequence") or 0),
+                offset_ms=_optional_int(payload.get("offset_ms")),
             )
         except (ProviderError, ValueError, TypeError) as exc:
             result = error_result(exc)

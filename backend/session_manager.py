@@ -7,9 +7,12 @@ from typing import Callable, Dict, List, Optional, Union
 import numpy as np
 
 from .audio_pipeline import AudioWindow, AudioWindowBuffer, decode_pcm16_base64
+from .glossary import Glossary
 from .models import SessionConfig, TranscriptSegment
 from .providers.base import ProviderError, TranscriptionProvider
 from .segment_merger import SegmentMerger
+from .timeline import CaptureTimeline
+from .voice_gate import VoiceGate
 
 ProviderFactoryType = Union[Callable[[SessionConfig], TranscriptionProvider], object]
 EmitCallback = Callable[[str, str, Dict[str, object]], None]
@@ -38,6 +41,9 @@ class _SessionState:
     startup_error: Optional[Exception] = None
     last_sequence: int = -1
     error: Optional[ProviderError] = None
+    timeline: CaptureTimeline = field(default_factory=CaptureTimeline)
+    voice_gate: Optional[VoiceGate] = None
+    glossary: Glossary = field(default_factory=Glossary)
 
 
 class SessionManager:
@@ -89,7 +95,12 @@ class SessionManager:
             }
 
     def push_audio(
-        self, sid: str, encoded_audio: str, sample_rate: int, sequence: int
+        self,
+        sid: str,
+        encoded_audio: str,
+        sample_rate: int,
+        sequence: int,
+        offset_ms: Optional[int] = None,
     ) -> bool:
         with self._lock:
             state = self._sessions.get(sid)
@@ -98,6 +109,7 @@ class SessionManager:
             if sequence <= state.last_sequence:
                 raise ValueError("INVALID_AUDIO_SEQUENCE: sequence must increase")
             state.last_sequence = sequence
+            state.timeline.observe(offset_ms)
 
         audio = decode_pcm16_base64(
             encoded_audio,
@@ -112,11 +124,14 @@ class SessionManager:
         except queue.Full:
             # Keep the newest audio close to real time when inference is slower
             # than capture. Dropping the oldest pending window is recoverable;
-            # turning it into a session-fatal error is not.
+            # turning it into a session-fatal error is not. The dropped audio is
+            # still part of the recording, so the timeline keeps its duration.
             try:
-                state.audio_queue.get_nowait()
+                discarded = state.audio_queue.get_nowait()
             except queue.Empty:
-                pass
+                discarded = None
+            if isinstance(discarded, _QueuedAudio):
+                state.timeline.mark_dropped(round(discarded.audio.size * 1000 / 16000))
             state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
             return True
 
@@ -278,19 +293,39 @@ class SessionManager:
         segments: List[TranscriptSegment],
         window_start_ms: int,
     ) -> None:
-        final_segments = [segment for segment in segments if segment.is_final]
-        for segment in state.merger.add(final_segments, window_start_ms):
+        final_segments = []
+        for segment in segments:
+            # Providers report offsets relative to the audio they received. The
+            # recording timeline additionally carries the pre-model capture
+            # origin and any audio dropped by backpressure.
+            start_ms = state.timeline.absolute_ms(segment.start_ms + window_start_ms)
+            corrected = state.glossary.correct(segment.text)
+            if not segment.is_final:
+                continue
+            final_segments.append(
+                TranscriptSegment(
+                    id=segment.id,
+                    text=corrected,
+                    start_ms=start_ms,
+                    end_ms=state.timeline.absolute_ms(segment.end_ms + window_start_ms),
+                    is_final=True,
+                    confidence=segment.confidence,
+                )
+            )
+        for segment in state.merger.add(final_segments, 0):
             self._emit(state.sid, "transcript_segment", segment.to_dict())
         for segment in segments:
             if segment.is_final:
                 continue
+            text = state.glossary.correct(segment.text).strip()
+            if not text:
+                continue
             candidate = TranscriptSegment(
                 id=segment.id,
-                text=segment.text.strip(),
-                start_ms=segment.start_ms + window_start_ms,
-                end_ms=segment.end_ms + window_start_ms,
+                text=text,
+                start_ms=state.timeline.absolute_ms(segment.start_ms + window_start_ms),
+                end_ms=state.timeline.absolute_ms(segment.end_ms + window_start_ms),
                 is_final=False,
                 confidence=segment.confidence,
             )
-            if candidate.text:
-                self._emit(state.sid, "transcript_segment", candidate.to_dict())
+            self._emit(state.sid, "transcript_segment", candidate.to_dict())

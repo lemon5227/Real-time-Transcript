@@ -266,3 +266,111 @@ def test_provisional_segments_are_emitted_but_not_saved_as_history():
     emitted_segments = [payload for event, payload in emitted if event == "transcript_segment"]
     assert {item["id"] for item in emitted_segments} == {"draft-1", "final-1"}
     assert [item["id"] for item in result["segments"]] == ["final-1"]
+
+
+def test_capture_offset_places_segments_on_the_recording_timeline():
+    class OffsetProvider(FakeProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def push(self, _audio):
+            self.calls += 1
+            if self.calls == 2:
+                return [TranscriptSegment("offset-1", "late start", 1000, 1500, True)]
+            return []
+
+    provider = OffsetProvider()
+    manager = SessionManager(provider_factory=lambda _config: provider)
+    config = SessionConfig(
+        "local", "fake", "en", 16000, window_seconds=1.0, overlap_seconds=0.5
+    )
+    manager.start("sid-1", config)
+    manager.push_audio(
+        "sid-1",
+        base64.b64encode(b"\x00\x00" * 32000).decode(),
+        sample_rate=16000,
+        sequence=1,
+        offset_ms=8000,
+    )
+
+    result = manager.stop("sid-1")
+
+    # The recording clock started 8s before the model accepted its first chunk.
+    # The second window starts 500ms into the 1s/0.5s sliding timeline, so it
+    # lands at 8s + 500ms + 1000ms of provider-reported offset.
+    assert result["segments"][0]["start_ms"] == 9500
+    assert result["segments"][0]["end_ms"] == 10000
+
+
+def test_dropped_audio_keeps_recording_timeline_aligned():
+    holding = threading.Event()
+
+    class HoldingProvider(FakeProvider):
+        name = "holding"
+        model = "holding-model"
+
+        def push(self, _audio):
+            # Keep the consumer busy so the queue really backs up.
+            assert holding.wait(timeout=2)
+            return []
+
+    manager = SessionManager(provider_factory=lambda _config: HoldingProvider())
+    manager.start(
+        "sid-1",
+        SessionConfig(
+            "local", "fake", "en", 16000, window_seconds=1.0, overlap_seconds=0.5, max_queue=2
+        ),
+    )
+    # The first window blocks inside the provider, later windows fill the queue,
+    # and the window after that makes the queue drop the oldest second of audio.
+    dropped = False
+    for sequence in range(1, 6):
+        dropped = manager.push_audio(
+            "sid-1",
+            base64.b64encode(b"\x00\x00" * 16000).decode(),
+            16000,
+            sequence,
+            offset_ms=(sequence - 1) * 1000,
+        )
+        if dropped:
+            break
+    assert dropped is True
+
+    state = manager._sessions["sid-1"]
+    with manager._lock:
+        timeline = state.timeline
+    assert timeline.origin_ms == 0
+    assert timeline.dropped_ms == 1000
+
+    holding.set()
+    manager.stop("sid-1")
+
+    # The dropped second still occupies recording time, so the provider's own
+    # one-second position must be reported two seconds into the recording.
+    assert timeline.absolute_ms(1000) == 2000
+
+
+def test_capture_offset_skips_audio_dropped_before_the_model_started():
+    manager = SessionManager(provider_factory=lambda _config: FakeProvider())
+    manager.start("sid-1", SessionConfig("local", "fake", "en", 16000))
+    state = manager._sessions["sid-1"]
+    state.stop_event.set()
+    state.worker.join(timeout=1)
+
+    # The browser discarded the pre-model backlog, so the first chunk the model
+    # receives is already 12s into the recording.
+    manager.push_audio(
+        "sid-1",
+        base64.b64encode(b"\x00\x00" * 16000).decode(),
+        16000,
+        sequence=1,
+        offset_ms=12000,
+    )
+
+    with manager._lock:
+        timeline = state.timeline
+    assert timeline.origin_known is True
+    assert timeline.origin_ms == 12000
+    assert timeline.absolute_ms(0) == 12000
+    assert timeline.absolute_ms(2500) == 14500
+    manager.stop("sid-1")
