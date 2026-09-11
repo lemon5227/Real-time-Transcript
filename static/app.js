@@ -75,7 +75,7 @@
     translationStopPromise: null,
     translationQueue: null,
     translationMode: "off",
-    translationProvider: "google",
+    translationProvider: "microsoft",
     translationTarget: "zh",
     translationModelMode: "auto",
     translationNotice: "",

@@ -41,22 +41,20 @@
                 <audio id="reviewAudio" controls preload="metadata" aria-label="课堂原声"></audio>
                 <div class="review-audio-meta"><span id="reviewAudioMeta">音频信息读取中…</span><button id="export-audio" class="export-button" type="button" disabled>导出原声</button></div>
               </section>
-              <section class="review-refinement" aria-labelledby="review-refinement-title">
-                <div class="review-refinement-heading"><div><span class="detail-kicker">TRANSCRIPT QUALITY / 转录版本</span><h3 id="review-refinement-title">课后精细转录</h3></div><span id="refine-transcription-status" class="refinement-status">使用实时稿</span></div>
-                <div class="transcript-source-row" role="group" aria-label="选择字幕版本"><button id="transcript-mode-realtime" class="transcript-mode-button is-selected" type="button"><strong>实时稿</strong><small>上课即时记录</small></button><button id="transcript-mode-refined" class="transcript-mode-button" type="button" disabled><strong>精细稿</strong><small>课后完整上下文</small></button><button id="refine-transcription" class="translation-action primary" type="button">开始精细转录</button></div>
-                <p id="refine-transcription-progress" class="refinement-progress">使用已保存原声做一次完整上下文校正；不会覆盖实时稿。</p>
-              </section>
-              <section class="review-translation" aria-labelledby="review-translation-title">
-                <div class="review-translation-heading"><div><span class="detail-kicker">TRANSLATE / 翻译</span><h3 id="review-translation-title">把没听懂的地方变成自己的话</h3></div><span id="review-translation-status" class="translation-status">选择翻译方式</span></div>
-                <div class="review-translation-controls">
-                  <label class="review-select-label" for="review-translation-mode">方式<select id="review-translation-mode" class="text-input select-input"><option value="fast">快速翻译</option><option value="model">精确翻译 · 模型</option><option value="auto">自动 · 本地优先</option></select></label>
-                  <label class="review-select-label" for="review-translation-provider">服务<select id="review-translation-provider" class="text-input select-input"><option value="google">Google Cloud</option><option value="microsoft">Microsoft Translator</option></select></label>
-                  <label class="review-select-label" for="review-translation-model">模型方式<select id="review-translation-model" class="text-input select-input"><option value="auto">自动</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select></label>
-                  <label class="review-select-label" for="review-translation-target">目标<select id="review-translation-target" class="text-input select-input"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></label>
-                </div>
-                <div class="review-translation-actions"><button id="translate-session" class="translation-action primary" type="button">翻译整节课</button><button id="translate-selected" class="translation-action" type="button">翻译选中段落</button><button id="translate-failed" class="translation-action" type="button">重试失败段落</button></div>
-                <p id="review-translation-progress" class="review-translation-progress">译文会保存在本机课堂笔记中；原声不会发送给翻译服务。</p>
-              </section>
+              <div class="review-tools-row" id="review-tools-row">
+                <section class="review-tool review-transcript-tool" id="review-transcript-tool" aria-labelledby="review-refinement-title">
+                  <div class="review-tool-heading"><div><span class="detail-kicker">TRANSCRIPT QUALITY</span><h3 id="review-refinement-title">字幕版本</h3></div><span id="refine-transcription-status" class="refinement-status">使用实时稿</span></div>
+                  <div class="transcript-source-row" role="group" aria-label="选择字幕版本"><button id="transcript-mode-realtime" class="transcript-mode-button is-selected" type="button"><strong>实时稿</strong><small>上课即时记录</small></button><button id="transcript-mode-refined" class="transcript-mode-button" type="button" disabled><strong>精细稿</strong><small>完整上下文校正</small></button><button id="refine-transcription" class="tool-primary-button" type="button">开始精细转录</button></div>
+                  <p id="refine-transcription-progress" class="tool-progress">使用已保存原声校正，不会覆盖实时稿。</p>
+                </section>
+                <section class="review-tool review-translation-tool" id="review-translation-tool" aria-labelledby="review-translation-title">
+                  <div class="review-tool-heading"><div><span class="detail-kicker">TRANSLATE</span><h3 id="review-translation-title">翻译</h3></div><span id="review-translation-status" class="translation-status">Microsoft Translator</span></div>
+                  <div class="translation-tool-main"><span class="translation-tool-summary" id="review-translation-summary">中文 · 快速翻译 · Microsoft Translator</span><button id="translate-selected" class="tool-primary-button" type="button">先选择字幕</button></div>
+                  <details class="translation-more"><summary>更多翻译设置</summary><div class="review-translation-controls"><label class="review-select-label" for="review-translation-mode">方式<select id="review-translation-mode" class="text-input select-input"><option value="fast" selected>快速翻译</option><option value="model">精确翻译 · 模型</option><option value="auto">自动 · 本地优先</option></select></label><label class="review-select-label" for="review-translation-provider">服务<select id="review-translation-provider" class="text-input select-input"><option value="microsoft" selected>Microsoft Translator</option><option value="google">Google Cloud</option></select></label><label class="review-select-label" for="review-translation-model">模型方式<select id="review-translation-model" class="text-input select-input"><option value="auto">自动</option><option value="local">本地模型</option><option value="cloud">云端模型</option></select></label><label class="review-select-label" for="review-translation-target">目标<select id="review-translation-target" class="text-input select-input"><option value="zh" selected>中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select></label></div><div class="review-translation-actions"><button id="translate-session" class="translation-action" type="button">翻译整节课</button><button id="translate-failed" class="translation-action" type="button">重试失败段落</button></div></details>
+                  <p id="review-translation-progress" class="tool-progress">译文只保存字幕文本，原声不会发送给翻译服务。</p>
+                </section>
+              </div>
+              <div class="review-selection-toolbar" id="review-selection-toolbar" hidden role="toolbar" aria-label="批量字幕操作"><span id="review-selected-count">已选择 0 段</span><button id="clear-segment-selection" class="toolbar-action-button" type="button">清除选择</button></div>
               <div class="review-stream-heading"><span class="detail-kicker">TRANSCRIPT / 字幕</span><span id="review-transcript-source" class="transcript-source-label">实时稿 · 上课同步记录</span></div>
               <div id="reviewStream" class="review-stream" data-note-input="noteInput"></div>
             </div>
