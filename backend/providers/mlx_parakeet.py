@@ -66,9 +66,8 @@ def mlx_runtime_available() -> bool:
 class MlxParakeetProvider:
     name = "mlx"
     requires_contiguous_audio = True
-    # A confirmed caption is what both the transcript and the translation queue
-    # wait for, so the cap decides how long a run-on sentence can delay its own
-    # translation. 24 words could hold a line for 10+ seconds of speech.
+    # Drafts are bounded so an unstable rolling hypothesis never fills the
+    # classroom view; confirmed segments use punctuation, pauses, and duration.
     max_words_in_current_draft = 32
 
     def __init__(
