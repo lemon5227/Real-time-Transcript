@@ -95,6 +95,29 @@ The Render service uses the lightweight cloud image and prompts for the three
 private cloud variables. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
 the platform matrix, port overrides, and troubleshooting.
 
+### macOS DMG desktop app
+
+The release builder creates `dist/Real-time-Transcript-macOS.dmg` for Apple
+Silicon Macs. Release maintainers need macOS, Homebrew `librsvg`, and the
+native `iconutil`, `hdiutil`, and `rsync` tools:
+
+```bash
+brew install librsvg
+./scripts/build-macos-dmg.sh
+```
+
+Open the DMG and drag **Real-time Transcript** to Applications. On the first
+launch, macOS may show a security warning because local builds are unsigned;
+use **Control-click → Open** once. The app bootstraps Python dependencies and
+stores its writable environment, `.env`, logs, PID files, caches, and model
+weights under `~/Library/Application Support/Real-time Transcript`, never in
+the app bundle. Model weights are downloaded from the in-app model manager on
+first use, so the first launch can take longer than later launches.
+
+To reset the packaged runtime, stop the local server and remove that
+Application Support directory. Source checkout startup is unchanged:
+`./quickstart.sh` continues to use the repository-local `.venv` and `.env`.
+
 On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. Open the gear-shaped Settings button to inspect model readiness and pre-download local models before class; runtime-managed models remain available as a first-use fallback.
 
 ## Choose a runtime

@@ -50,3 +50,15 @@ def test_latency_docs_do_not_point_at_missing_probes():
     ]:
         assert name in docs
         assert (ROOT / "tools" / name).is_file(), name + " is referenced but missing"
+
+
+def test_macos_dmg_docs_explain_first_run_and_external_runtime():
+    for relative_path in ["README.md", "QUICKSTART.md", "docs/DEPLOYMENT.md"]:
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        for phrase in [
+            "Real-time-Transcript-macOS.dmg",
+            "Application Support/Real-time Transcript",
+            "Control-click",
+            "model weights",
+        ]:
+            assert phrase in content, f"{phrase} missing from {relative_path}"

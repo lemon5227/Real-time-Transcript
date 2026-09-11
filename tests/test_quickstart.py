@@ -1,9 +1,15 @@
+import sys
 from pathlib import Path
 
 import pytest
 
 import quickstart
-from quickstart import BootstrapProfile, missing_cloud_settings, select_profile
+from quickstart import (
+    BootstrapProfile,
+    missing_cloud_settings,
+    resolve_runtime_root,
+    select_profile,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,6 +49,68 @@ def test_missing_cloud_settings_only_returns_variable_names(tmp_path: Path):
     env_path.write_text("CLOUD_BASE_URL=https://example.test/v1\nCLOUD_API_KEY=secret\n", encoding="utf-8")
 
     assert missing_cloud_settings(env_path) == ["CLOUD_TRANSCRIPTION_MODEL"]
+
+
+def test_runtime_root_defaults_to_source_root(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TRANSCRIPT_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("TRANSCRIPT_ENV_FILE", raising=False)
+
+    assert resolve_runtime_root(tmp_path) == tmp_path
+
+
+def test_runtime_root_prefers_explicit_runtime_directory(tmp_path: Path, monkeypatch):
+    runtime_root = tmp_path / "Application Support" / "Real-time Transcript"
+    env_file = tmp_path / "legacy" / ".env"
+    monkeypatch.setenv("TRANSCRIPT_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("TRANSCRIPT_ENV_FILE", str(env_file))
+
+    assert resolve_runtime_root(tmp_path) == runtime_root
+
+
+def test_runtime_root_uses_env_file_parent_when_runtime_dir_is_unset(
+    tmp_path: Path, monkeypatch
+):
+    env_file = tmp_path / "Application Support" / "Real-time Transcript" / ".env"
+    monkeypatch.delenv("TRANSCRIPT_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("TRANSCRIPT_ENV_FILE", str(env_file))
+
+    assert resolve_runtime_root(tmp_path) == env_file.parent
+
+
+def test_ensure_env_file_can_write_to_external_runtime_root(tmp_path: Path):
+    source_root = tmp_path / "app"
+    runtime_root = tmp_path / "Application Support" / "Real-time Transcript"
+    source_root.mkdir()
+    (source_root / ".env.example").write_text("PORT=54321\n", encoding="utf-8")
+
+    assert quickstart.ensure_env_file(source_root, runtime_root=runtime_root) is True
+    assert (runtime_root / ".env").read_text(encoding="utf-8") == "PORT=54321\n"
+    assert not (source_root / ".env").exists()
+
+
+def test_ensure_venv_can_live_under_external_runtime_root(tmp_path: Path, monkeypatch):
+    source_root = tmp_path / "app"
+    runtime_root = tmp_path / "Application Support" / "Real-time Transcript"
+    source_root.mkdir()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        venv_path = Path(command[-1])
+        python_path = venv_path / "bin" / "python"
+        python_path.parent.mkdir(parents=True, exist_ok=True)
+        python_path.touch()
+
+    monkeypatch.setattr(quickstart.subprocess, "run", fake_run)
+
+    python_path = quickstart.ensure_venv(
+        source_root,
+        bootstrap_python=Path(sys.executable),
+        runtime_root=runtime_root,
+    )
+
+    assert python_path == runtime_root / ".venv" / "bin" / "python"
+    assert calls[0][0][-3:] == ["-m", "venv", str(runtime_root / ".venv")]
 
 
 def test_windows_launcher_translates_power_shell_mode_switch():

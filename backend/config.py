@@ -163,7 +163,11 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         try:
             from dotenv import load_dotenv
 
-            load_dotenv()
+            env_file = os.environ.get("TRANSCRIPT_ENV_FILE", "").strip()
+            if env_file:
+                load_dotenv(dotenv_path=env_file)
+            else:
+                load_dotenv()
         except ImportError:
             pass
         source: Mapping[str, str] = os.environ
