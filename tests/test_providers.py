@@ -564,7 +564,200 @@ def test_mlx_provider_emits_a_newly_finalized_sentence_once():
     assert repeated == []
 
 
-def test_mlx_provider_breaks_unpunctuated_final_text_into_readable_chunks():
+def test_mlx_provider_maps_rolling_token_times_to_recording_time():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+            self.duration = end - start
+
+    class Stream:
+        def __init__(self):
+            self.calls = 0
+            self.finalized_tokens = []
+            self.draft_tokens = []
+            self.result = type("Result", (), {"text": "", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            self.calls += 1
+            frames = 101 if self.calls == 1 else 130
+            self.mel_buffer = SimpleNamespace(shape=(1, frames))
+            if self.calls == 2:
+                self.finalized_tokens = [Token(" first.", 0.16, 0.32)]
+
+    stream = Stream()
+
+    class Model:
+        preprocessor_config = SimpleNamespace(sample_rate=16000, hop_length=160)
+
+        def transcribe_stream(self, **_kwargs):
+            return stream
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    provider.push(np.zeros(16000, dtype=np.float32))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [(item.start_ms, item.end_ms) for item in result] == [(860, 1020)]
+
+
+def test_mlx_provider_preserves_gap_between_absolute_token_groups():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+            self.duration = end - start
+
+    class Stream:
+        def __init__(self):
+            self.calls = 0
+            self.finalized_tokens = []
+            self.draft_tokens = []
+            self.result = type("Result", (), {"text": "", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            self.calls += 1
+            frames = {1: 101, 2: 130, 3: 140}[self.calls]
+            self.mel_buffer = SimpleNamespace(shape=(1, frames))
+            if self.calls == 2:
+                self.finalized_tokens = [Token(" first.", 0.16, 0.32)]
+            elif self.calls == 3:
+                self.finalized_tokens = [
+                    Token(" first.", 0.16, 0.32),
+                    Token(" second.", 0.8, 0.96),
+                ]
+
+    stream = Stream()
+
+    class Model:
+        preprocessor_config = SimpleNamespace(sample_rate=16000, hop_length=160)
+
+        def transcribe_stream(self, **_kwargs):
+            return stream
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+    provider.push(np.zeros(16000, dtype=np.float32))
+    provider.push(np.zeros(16000, dtype=np.float32))
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [(item.start_ms, item.end_ms) for item in result] == [(2400, 2560)]
+
+
+def test_mlx_stable_stream_does_not_build_unused_full_result():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        text = " hello."
+        start = 0.2
+        end = 0.4
+        duration = 0.2
+
+    class Stream:
+        finalized_tokens = [Token()]
+        draft_tokens = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @property
+        def result(self):
+            raise AssertionError("stable stream should not build result")
+
+        def add_audio(self, _audio):
+            self.mel_buffer = SimpleNamespace(shape=(1, 130))
+
+    class Model:
+        preprocessor_config = SimpleNamespace(sample_rate=16000, hop_length=160)
+
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert result[0].text == "hello."
+
+
+def test_mlx_provider_splits_unpunctuated_run_on_a_natural_pause():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+            self.duration = end - start
+
+    class Stream:
+        finalized_tokens = [
+            Token(" first thought", 0.2, 0.4),
+            Token(" second thought", 1.0, 1.2),
+        ]
+        draft_tokens = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @property
+        def result(self):
+            return type("Result", (), {"text": "", "sentences": []})()
+
+        def add_audio(self, _audio):
+            self.mel_buffer = SimpleNamespace(shape=(1, 130))
+
+    class Model:
+        preprocessor_config = SimpleNamespace(sample_rate=16000, hop_length=160)
+
+        def transcribe_stream(self, **_kwargs):
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [(item.text, item.is_final) for item in result] == [
+        ("first thought", True),
+        ("second thought", False),
+    ]
+
+
+def test_mlx_provider_breaks_a_very_long_unpunctuated_run():
     from backend.providers.mlx_parakeet import MlxParakeetProvider
 
     class Token:
@@ -575,7 +768,10 @@ def test_mlx_provider_breaks_unpunctuated_final_text_into_readable_chunks():
 
     class Stream:
         def __init__(self):
-            self.finalized_tokens = [Token(" word%d" % index, index * 0.2) for index in range(1, 26)]
+            self.finalized_tokens = [
+                Token(" word%d" % index, (index - 1) * 0.45)
+                for index in range(1, 26)
+            ]
             self.draft_tokens = []
             self.result = type("Result", (), {"text": "", "sentences": []})()
 
@@ -598,12 +794,11 @@ def test_mlx_provider_breaks_unpunctuated_final_text_into_readable_chunks():
     provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
     result = provider.push(np.zeros(16000, dtype=np.float32))
 
-    limit = MlxParakeetProvider.max_words_per_segment
     assert result[0].is_final is True
-    assert result[0].text == " ".join("word%d" % index for index in range(1, limit + 1))
+    assert result[0].text == " ".join("word%d" % index for index in range(1, 21))
     assert result[1].is_final is False
     assert result[1].text == " ".join(
-        "word%d" % index for index in range(limit + 1, 26)
+        "word%d" % index for index in range(21, 26)
     )
 
 
