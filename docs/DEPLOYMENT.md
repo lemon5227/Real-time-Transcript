@@ -1,6 +1,6 @@
 # Deployment
 
-Real-time Transcript has three deployment paths. Choose the path that matches
+拾句（Real-time Transcript）has three deployment paths. Choose the path that matches
 the computer doing the transcription rather than the computer opening the web
 page.
 
@@ -64,18 +64,18 @@ brew install librsvg
 ./scripts/build-macos-dmg.sh
 ```
 
-The result is `dist/Real-time-Transcript-macOS.dmg`. Drag the app to
+The result is `dist/拾句-macOS.dmg`. Drag **拾句** to
 Applications. An unsigned local build may be blocked on first launch; use
 **Control-click → Open** once to approve it. The launcher resolves its bundled
 source files independently of the current working directory, creates
-`~/Library/Application Support/Real-time Transcript/{runtime,logs,pids}`, and
+`~/Library/Application Support/拾句/{runtime,logs,pids}`, and
 exports `TRANSCRIPT_RUNTIME_DIR` and `TRANSCRIPT_ENV_FILE`. This keeps the
 `.env`, Python environment, caches, logs, recordings, and model weights out of
 the app bundle. Model weights are downloaded only when the user chooses a
 model in the app, so installing the DMG does not silently download gigabytes.
 
 To reset a packaged installation, quit the browser/server and remove the
-`~/Library/Application Support/Real-time Transcript` directory. Source
+`~/Library/Application Support/拾句` directory. Source
 checkout startup remains unchanged and continues to use `.venv` and `.env` in
 the repository.
 

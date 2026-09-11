@@ -1,4 +1,4 @@
-/* EchoNote live classroom workbench. No framework required: the page stays fast on thin laptops. */
+/* 拾句 live classroom workbench. No framework required: the page stays fast on thin laptops. */
 (function () {
   "use strict";
 

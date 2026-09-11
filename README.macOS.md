@@ -1,4 +1,4 @@
-# macOS guide
+# 拾句 macOS guide
 
 Apple Silicon Macs use the MLX Parakeet runtime for English and European-language lectures. Intel Macs stay on the standard CPU Whisper path. If the laptop is too warm or cannot keep up, use Auto/Cloud mode; the device panel shows the active runtime before class.
 

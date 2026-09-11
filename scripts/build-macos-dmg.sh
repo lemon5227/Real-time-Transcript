@@ -30,9 +30,9 @@ SAFE_VERSION="${VERSION//[^0-9A-Za-z.-]/-}"
 BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/real-time-transcript-build.XXXXXX")"
 trap 'rm -rf "$BUILD_ROOT"' EXIT
 
-ICONSET_DIR="$BUILD_ROOT/Real-time Transcript.iconset"
-ICNS_PATH="$BUILD_ROOT/Real-time Transcript.icns"
-APP_BUNDLE="$BUILD_ROOT/Real-time Transcript.app"
+ICONSET_DIR="$BUILD_ROOT/拾句.iconset"
+ICNS_PATH="$BUILD_ROOT/拾句.icns"
+APP_BUNDLE="$BUILD_ROOT/拾句.app"
 CONTENTS_ROOT="$APP_BUNDLE/Contents"
 APP_ROOT="$CONTENTS_ROOT/Resources/app"
 mkdir -p "$ICONSET_DIR" "$CONTENTS_ROOT/MacOS" "$CONTENTS_ROOT/Resources"
@@ -72,7 +72,7 @@ rsync -a \
 
 cp "$PROJECT_ROOT/packaging/macos/launcher.sh" "$CONTENTS_ROOT/MacOS/RealTimeTranscript"
 chmod 755 "$CONTENTS_ROOT/MacOS/RealTimeTranscript"
-cp "$ICNS_PATH" "$CONTENTS_ROOT/Resources/Real-time Transcript.icns"
+cp "$ICNS_PATH" "$CONTENTS_ROOT/Resources/拾句.icns"
 sed "s/__VERSION__/$SAFE_VERSION/g" "$PROJECT_ROOT/packaging/macos/Info.plist" >"$CONTENTS_ROOT/Info.plist"
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
@@ -87,15 +87,15 @@ cp -R "$APP_BUNDLE" "$DMG_STAGE/"
 ln -s /Applications "$DMG_STAGE/Applications"
 
 mkdir -p "$OUTPUT_DIR"
-DMG_PATH="$OUTPUT_DIR/Real-time-Transcript-macOS.dmg"
+DMG_PATH="$OUTPUT_DIR/拾句-macOS.dmg"
 rm -f "$DMG_PATH"
 hdiutil create \
-  -volname "Real-time Transcript" \
+  -volname "拾句" \
   -srcfolder "$DMG_STAGE" \
   -ov \
   -format UDZO \
   "$DMG_PATH" >/dev/null
 
 printf 'Built %s for %s\n' "$DMG_PATH" "$ARCH"
-printf 'First launch bootstraps dependencies and stores runtime data under ~/Library/Application Support/Real-time Transcript.\n'
+printf 'First launch bootstraps dependencies and stores runtime data under ~/Library/Application Support/拾句.\n'
 printf 'Model weights remain outside the app bundle and are downloaded by the in-app model manager.\n'

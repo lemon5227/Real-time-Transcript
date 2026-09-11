@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Real-time Transcript</string>
+  <string>拾句</string>
   <key>CFBundleExecutable</key>
   <string>RealTimeTranscript</string>
   <key>CFBundleIconFile</key>
-  <string>Real-time Transcript</string>
+  <string>拾句</string>
   <key>CFBundleIdentifier</key>
   <string>com.lemon5227.realtimetranscript</string>
   <key>CFBundleName</key>
-  <string>Real-time Transcript</string>
+  <string>拾句</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

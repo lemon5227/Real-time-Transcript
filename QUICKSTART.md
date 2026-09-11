@@ -24,7 +24,7 @@ deployment.
 ## macOS DMG
 
 For the packaged desktop app, a release maintainer can build
-`dist/Real-time-Transcript-macOS.dmg` on macOS after installing Homebrew
+`dist/拾句-macOS.dmg` on macOS after installing Homebrew
 `librsvg`:
 
 ```bash
@@ -32,10 +32,10 @@ brew install librsvg
 ./scripts/build-macos-dmg.sh
 ```
 
-Users drag the app from the DMG to Applications and open it. If macOS blocks
+Users drag **拾句** from the DMG to Applications and open it. If macOS blocks
 an unsigned local build, use **Control-click → Open** for the first launch.
 The app keeps the writable environment, `.env`, logs, caches, and model weights
-outside the bundle in `~/Library/Application Support/Real-time Transcript`.
+outside the bundle in `~/Library/Application Support/拾句`.
 Model weights download through the model manager on first use; they are not
 embedded in the DMG. The repository commands above continue to use the local
 `.venv` and `.env` exactly as before.

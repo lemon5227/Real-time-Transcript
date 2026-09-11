@@ -50,7 +50,7 @@ def test_macos_launcher_uses_external_user_runtime_and_bounded_health_check():
     for token in [
         "TRANSCRIPT_RUNTIME_DIR",
         "TRANSCRIPT_ENV_FILE",
-        "Application Support/Real-time Transcript",
+        "Application Support/拾句",
         "quickstart.py",
         "--mode auto",
         "/api/health",
@@ -58,6 +58,10 @@ def test_macos_launcher_uses_external_user_runtime_and_bounded_health_check():
         "osascript",
         "trap",
         'wait_for_health "$STARTUP_TIMEOUT_SECONDS" "$existing_pid"',
+        "/opt/homebrew/bin",
+        "$HOME/.local/bin",
+        "python3.12",
+        "brew install python@3.12",
     ]:
         assert token in source
     assert "/Users/" not in source
@@ -75,7 +79,9 @@ def test_macos_bundle_metadata_declares_app_icon_and_runtime_entrypoint():
 
     assert values["CFBundlePackageType"] == "APPL"
     assert values["CFBundleExecutable"] == "RealTimeTranscript"
-    assert values["CFBundleIconFile"] == "Real-time Transcript"
+    assert values["CFBundleDisplayName"] == "拾句"
+    assert values["CFBundleName"] == "拾句"
+    assert values["CFBundleIconFile"] == "拾句"
 
 
 def test_macos_dmg_builder_is_explicit_about_platform_tools_and_exclusions():
@@ -88,7 +94,9 @@ def test_macos_dmg_builder_is_explicit_about_platform_tools_and_exclusions():
         "rsync",
         "MacOS/RealTimeTranscript",
         "Resources/app",
-        "Real-time Transcript.icns",
+        "拾句.icns",
+        "拾句-macOS.dmg",
+        "拾句.app",
         "Applications",
         "CODESIGN_IDENTITY",
         ".env",

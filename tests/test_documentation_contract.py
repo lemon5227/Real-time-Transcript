@@ -56,8 +56,8 @@ def test_macos_dmg_docs_explain_first_run_and_external_runtime():
     for relative_path in ["README.md", "QUICKSTART.md", "docs/DEPLOYMENT.md"]:
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         for phrase in [
-            "Real-time-Transcript-macOS.dmg",
-            "Application Support/Real-time Transcript",
+            "拾句-macOS.dmg",
+            "Application Support/拾句",
             "Control-click",
             "model weights",
         ]:

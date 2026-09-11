@@ -16,6 +16,17 @@ def test_live_page_exposes_accessible_lecture_workbench():
     assert "/static/app.js" in html
 
 
+def test_live_and_review_pages_use_the_shiju_product_brand():
+    app = create_app({})
+    live_html = app.test_client().get("/").get_data(as_text=True)
+    review_html = app.test_client().get("/review").get_data(as_text=True)
+
+    for html in [live_html, review_html]:
+        assert "拾句" in html
+        assert "EchoNote" not in html
+        assert "lecture, made legible" not in html
+
+
 def test_live_page_keeps_topbar_focused_without_redundant_privacy_badge():
     app = create_app({})
     html = app.test_client().get("/").get_data(as_text=True)

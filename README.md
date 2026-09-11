@@ -1,4 +1,4 @@
-# Real-time Transcript
+# 拾句 · Real-time Transcript
 
 面向留学生听课和课后复习的实时转录工作台。它把“听不清、跟不上、课后找不到重点”拆成一条简单的学习流：课上实时字幕，课后可搜索、编辑、标记和导出。
 
@@ -97,7 +97,7 @@ the platform matrix, port overrides, and troubleshooting.
 
 ### macOS DMG desktop app
 
-The release builder creates `dist/Real-time-Transcript-macOS.dmg` for Apple
+The release builder creates `dist/拾句-macOS.dmg` for Apple
 Silicon Macs. Release maintainers need macOS, Homebrew `librsvg`, and the
 native `iconutil`, `hdiutil`, and `rsync` tools:
 
@@ -106,16 +106,16 @@ brew install librsvg
 ./scripts/build-macos-dmg.sh
 ```
 
-Open the DMG and drag **Real-time Transcript** to Applications. On the first
+Open the DMG and drag **拾句** to Applications. On the first
 launch, macOS may show a security warning because local builds are unsigned;
 use **Control-click → Open** once. The app bootstraps Python dependencies and
 stores its writable environment, `.env`, logs, PID files, caches, and model
-weights under `~/Library/Application Support/Real-time Transcript`, never in
+weights under `~/Library/Application Support/拾句`, never in
 the app bundle. Model weights are downloaded from the in-app model manager on
 first use, so the first launch can take longer than later launches.
 
 To reset the packaged runtime, stop the local server and remove that
-Application Support directory. Source checkout startup is unchanged:
+拾句 Application Support directory. Source checkout startup is unchanged:
 `./quickstart.sh` continues to use the repository-local `.venv` and `.env`.
 
 On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. Open the gear-shaped Settings button to inspect model readiness and pre-download local models before class; runtime-managed models remain available as a first-use fallback.

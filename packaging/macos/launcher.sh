@@ -7,8 +7,23 @@ PORT="${PORT:-8765}"
 BASE_URL="http://127.0.0.1:${PORT}"
 HEALTH_URL="$BASE_URL/api/health"
 STARTUP_TIMEOUT_SECONDS="${TRANSCRIPT_STARTUP_TIMEOUT_SECONDS:-90}"
+for common_bin in "/opt/homebrew/bin" "/usr/local/bin" "$HOME/.local/bin"; do
+  if [[ -d "$common_bin" ]]; then
+    PATH="$common_bin:${PATH:-}"
+  fi
+done
+export PATH
+
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-APP_SUPPORT_ROOT="${TRANSCRIPT_APP_SUPPORT_DIR:-$HOME/Library/Application Support/Real-time Transcript}"
+APP_SUPPORT_ROOT="${TRANSCRIPT_APP_SUPPORT_DIR:-$HOME/Library/Application Support/拾句}"
 RUNTIME_ROOT="${TRANSCRIPT_RUNTIME_DIR:-$APP_SUPPORT_ROOT/runtime}"
 ENV_FILE="${TRANSCRIPT_ENV_FILE:-$RUNTIME_ROOT/.env}"
 LOG_ROOT="$APP_SUPPORT_ROOT/logs"
@@ -70,9 +85,12 @@ wait_for_health() {
 
 show_failure() {
   local message="$1"
+  if [[ -f "$LOG_FILE" ]] && grep -q "requires Python 3.10" "$LOG_FILE"; then
+    message="拾句需要 Python 3.10+。请先运行 brew install python@3.12，再重新打开应用。详细日志：$LOG_FILE"
+  fi
   printf '%s\n' "$message" >&2
   if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display alert \"Real-time Transcript 启动失败\" message \"$message\"" >/dev/null 2>&1 || true
+    osascript -e "display alert \"拾句启动失败\" message \"$message\"" >/dev/null 2>&1 || true
   fi
 }
 

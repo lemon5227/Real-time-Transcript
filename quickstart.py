@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the appropriate runtime and launch Real-time Transcript.
+"""Prepare the appropriate runtime and launch 拾句.
 
 This module intentionally uses only Python's standard library so it can run
 before the project's virtual environment has been created.
@@ -242,7 +242,7 @@ def _nvidia_available() -> bool:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Prepare and launch Real-time Transcript for this device."
+        description="Prepare and launch 拾句 for this device."
     )
     parser.add_argument(
         "--mode",
@@ -287,7 +287,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if missing:
             print("Cloud transcription is not configured yet. Missing variable names: " + ", ".join(missing))
 
-    print(f"Starting Real-time Transcript ({profile.runtime_label})...")
+    print(f"Starting 拾句 ({profile.runtime_label})...")
     completed = subprocess.run(
         [str(python_path), str(root / "app.py")],
         cwd=root,
