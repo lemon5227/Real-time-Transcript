@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Protocol, Sequence
+from typing import Callable, List, Optional, Protocol, Sequence, Tuple
 
 from .providers.base import ProviderError
 
@@ -207,36 +207,95 @@ class TranslationRouter:
         }
 
     def resolve(self, mode: str, provider: str = "auto", local_ready: bool = False) -> TranslationSelection:
-        normalized_mode = str(mode or "off").strip().lower()
-        normalized_provider = str(provider or "auto").strip().lower()
-        if normalized_mode == "off":
-            return TranslationSelection(None, "none", "off")
-        if normalized_mode == "fast":
-            candidates = [normalized_provider] if normalized_provider != "auto" else ["google", "microsoft"]
-            return self._select(candidates, "fast")
-        if normalized_mode in {"model", "precise", "auto"}:
-            if normalized_provider == "auto":
-                candidates = ["local", "cloud"] if local_ready else ["cloud", "local"]
-            else:
-                candidates = [normalized_provider]
-            return self._select(candidates, "model")
-        raise ProviderError("TRANSLATION_INVALID_MODE", "实时翻译模式无效")
+        selections = self.resolve_all(mode, provider, local_ready)
+        if not selections:
+            if str(mode or "off").strip().lower() == "off":
+                return TranslationSelection(None, "none", "off")
+            raise ProviderError(
+                "TRANSLATION_NOT_CONFIGURED",
+                "所选翻译服务尚未配置",
+                "检查翻译设置，或关闭实时翻译",
+            )
+        return selections[0]
 
-    def _select(self, candidates: List[str], mode: str) -> TranslationSelection:
-        for name in candidates:
-            selected = self.providers.get(name)
-            if selected is not None:
-                return TranslationSelection(
-                    selected,
-                    name,
-                    mode,
-                    getattr(selected, "model", None),
-                )
+    def resolve_all(
+        self, mode: str, provider: str = "auto", local_ready: bool = False
+    ) -> List[TranslationSelection]:
+        """Every usable provider, best first.
+
+        Returning the whole chain lets the caller fall through when the preferred
+        provider is momentarily failing, which is what "auto" promises.
+        """
+        normalized_mode = str(mode or "off").strip().lower()
+        if normalized_mode == "off":
+            return []
+
+        normalized_provider = str(provider or "auto").strip().lower()
+        if normalized_mode == "fast":
+            if normalized_provider != "auto":
+                names = [normalized_provider]
+            else:
+                names = self._preference_order(["google", "microsoft"])
+            resolved_mode = "fast"
+        elif normalized_mode in {"model", "precise", "auto"}:
+            if normalized_provider == "auto":
+                names = ["local", "cloud"] if local_ready else ["cloud", "local"]
+            else:
+                names = [normalized_provider]
+            resolved_mode = "model"
+        else:
+            raise ProviderError("TRANSLATION_INVALID_MODE", "实时翻译模式无效")
+
+        return [
+            TranslationSelection(provider_object, name, resolved_mode, getattr(provider_object, "model", None))
+            for name in names
+            for provider_object in [self.providers.get(name)]
+            if provider_object is not None
+        ]
+
+    def _preference_order(self, names: List[str]) -> List[str]:
+        """Push best-effort providers behind configured ones.
+
+        The keyless Google web endpoint is a convenience, not a service: it can
+        start returning consent/verification pages at any time, and it must never
+        shadow a provider the operator actually configured a key for.
+        """
+        return sorted(
+            names,
+            key=lambda name: (
+                bool(getattr(self.providers.get(name), "best_effort", False)),
+                names.index(name),
+            ),
+        )
+
+
+def translate_with_fallback(
+    selections: Sequence[TranslationSelection],
+    texts: Sequence[str],
+    source_language: str,
+    target_language: str,
+) -> Tuple[List[str], TranslationSelection]:
+    """Translate with the first provider that works, falling through on failure."""
+    if not selections:
         raise ProviderError(
             "TRANSLATION_NOT_CONFIGURED",
             "所选翻译服务尚未配置",
             "检查翻译设置，或关闭实时翻译",
         )
+    failures: List[ProviderError] = []
+    for selection in selections:
+        if selection.provider is None:
+            continue
+        try:
+            return (
+                selection.provider.translate_batch(texts, source_language, target_language),
+                selection,
+            )
+        except ProviderError as exc:
+            failures.append(exc)
+    raise failures[0] if failures else ProviderError(
+        "TRANSLATION_NOT_CONFIGURED", "所选翻译服务尚未配置"
+    )
 
 
 def __getattr__(name):
@@ -256,5 +315,6 @@ __all__ = [
     "TranslationProvider",
     "TranslationRouter",
     "TranslationSelection",
+    "translate_with_fallback",
     "validate_translation_batch",
 ]

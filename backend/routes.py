@@ -7,6 +7,7 @@ from .config import AppConfig
 from .device import device_public_dict, get_device_profile
 from .models import SessionConfig
 from .providers.base import ProviderError
+from .translation import translate_with_fallback
 
 LOCAL_MODELS = (
     {"id": "parakeet-tdt-0.6b-v3", "label": "Parakeet TDT v3 · Mac MLX", "model_ref": "mlx-community/parakeet-tdt-0.6b-v3", "runtime": "mlx", "size": "~2.5GB", "speed": "最快", "quality": "很好", "resource": "中", "languages": "英语 / 24 种欧洲语言", "best_for": "Apple Silicon · 英语课堂"},
@@ -151,19 +152,20 @@ def register_routes(app: Flask, config: AppConfig) -> None:
             if any(not item["text"] for item in items):
                 raise ValueError("TRANSLATION_INVALID_TEXT: 翻译文本不能为空")
             router = current_app.extensions["translation_router"]
-            selection = router.resolve(
+            selections = router.resolve_all(
                 mode=str(payload.get("mode") or "fast"),
                 provider=str(payload.get("provider") or "auto"),
                 local_ready=bool(payload.get("local_ready", False)),
             )
-            if selection.provider is None:
+            if not selections:
                 return jsonify({"status": "disabled", "translations": []})
-            translated = selection.provider.translate_batch(
+            target_language = str(payload.get("target_language") or "zh")
+            translated, selection = translate_with_fallback(
+                selections,
                 [item["text"] for item in items],
                 str(payload.get("source_language") or "en"),
-                str(payload.get("target_language") or "zh"),
+                target_language,
             )
-            target_language = str(payload.get("target_language") or "zh")
             return jsonify({
                 "status": "success",
                 "provider": selection.provider_name,
@@ -290,15 +292,16 @@ def register_socket_handlers(socketio: SocketIO) -> None:
         try:
             segment_ids = [str(item) for item in (payload.get("segment_ids") or [])]
             items = manager.translation_segments(flask_request.sid, segment_ids)
-            selection = router.resolve(
+            selections = router.resolve_all(
                 mode=str(payload.get("mode") or "fast"),
                 provider=str(payload.get("provider") or "auto"),
                 local_ready=bool(payload.get("local_ready", False)),
             )
-            if selection.provider is None:
+            if not selections:
                 return {"status": "disabled", "translations": []}
             target_language = str(payload.get("target_language") or "zh")
-            translated = selection.provider.translate_batch(
+            translated, selection = translate_with_fallback(
+                selections,
                 [item["text"] for item in items],
                 str(payload.get("source_language") or "en"),
                 target_language,

@@ -9,6 +9,7 @@ from backend.translation import (
     MicrosoftTranslationProvider,
     ModelTranslationProvider,
     TranslationRouter,
+    translate_with_fallback,
 )
 
 
@@ -96,6 +97,119 @@ def test_google_public_fallback_uses_http2_curl_after_rate_limit(monkeypatch):
     assert calls
     assert "--http2" in calls[0][0]
     assert calls[0][1]["shell"] is False
+
+
+def test_google_public_path_reports_the_verification_page_honestly(monkeypatch):
+    """Google answers the undocumented endpoint with a 200 and an HTML block page.
+
+    Reporting that as "invalid response format" sent people hunting for a parser
+    bug when the real fix is configuring a real provider.
+    """
+
+    class HtmlResponse(FakeResponse):
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+
+        @property
+        def text(self):
+            return "<html><head><title>Sorry...</title></head><body>unusual traffic</body></html>"
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: HtmlResponse(200, None))
+    provider = GoogleTranslationProvider("", "")
+
+    with pytest.raises(ProviderError) as error:
+        provider.translate_batch(["Hello"], "en", "zh")
+
+    assert error.value.code == "TRANSLATION_PUBLIC_UNAVAILABLE"
+    assert "验证页" in error.value.message
+
+
+def test_google_public_path_still_parses_a_real_json_answer(monkeypatch):
+    class JsonResponse(FakeResponse):
+        headers = {"Content-Type": "application/json"}
+        text = '[[["你好", "Hello", null, null, 1]]]'
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: JsonResponse(200, [[["你好", "Hello"]]]))
+    provider = GoogleTranslationProvider("", "")
+
+    assert provider.translate_batch(["Hello"], "en", "zh") == ["你好"]
+
+
+def test_google_provider_declares_itself_best_effort_without_a_key():
+    assert GoogleTranslationProvider("", "").best_effort is True
+    assert GoogleTranslationProvider("", "google-secret").best_effort is False
+
+
+def test_router_prefers_the_configured_provider_over_the_best_effort_one():
+    """A keyless public fallback must never shadow a provider with a key."""
+    public = GoogleTranslationProvider("", "")
+    configured = MicrosoftTranslationProvider("https://example.test", "microsoft-key")
+    router = TranslationRouter(google=public, microsoft=configured)
+
+    names = [selection.provider_name for selection in router.resolve_all("fast", "auto")]
+
+    assert names == ["microsoft", "google"]
+    assert router.resolve("fast", "auto").provider_name == "microsoft"
+
+
+def test_router_still_offers_the_public_path_when_it_is_all_there_is():
+    router = TranslationRouter(google=GoogleTranslationProvider("", ""))
+
+    assert [s.provider_name for s in router.resolve_all("fast", "auto")] == ["google"]
+
+
+def test_router_keeps_an_explicit_provider_choice():
+    """An explicit provider is a decision, not a hint -- do not reorder it."""
+    router = TranslationRouter(
+        google=GoogleTranslationProvider("", ""),
+        microsoft=MicrosoftTranslationProvider("https://example.test", "microsoft-key"),
+    )
+
+    assert [s.provider_name for s in router.resolve_all("fast", "google")] == ["google"]
+
+
+def test_translation_falls_through_to_the_next_provider():
+    class Broken:
+        name = "broken"
+        mode = "fast"
+        model = None
+
+        def translate_batch(self, *_args):
+            raise ProviderError("TRANSLATION_PROVIDER_UNAVAILABLE", "down")
+
+    class Working:
+        name = "working"
+        mode = "fast"
+        model = None
+
+        def translate_batch(self, texts, _source, _target):
+            return ["译:" + text for text in texts]
+
+    broken, working = Broken(), Working()
+    router = TranslationRouter(google=broken, microsoft=working)
+    selections = router.resolve_all("fast", "auto")
+    assert [s.provider_name for s in selections] == ["google", "microsoft"]
+
+    translated, selection = translate_with_fallback(selections, ["Hello"], "en", "zh")
+
+    assert translated == ["译:Hello"]
+    assert selection.provider is working
+
+
+def test_translation_reports_the_first_failure_when_every_provider_is_down():
+    class Broken:
+        name = "broken"
+        mode = "fast"
+        model = None
+
+        def translate_batch(self, *_args):
+            raise ProviderError("TRANSLATION_PROVIDER_UNAVAILABLE", "down")
+
+    with pytest.raises(ProviderError) as error:
+        translate_with_fallback(
+            TranslationRouter(google=Broken()).resolve_all("fast", "auto"), ["Hello"], "en", "zh"
+        )
+
+    assert error.value.code == "TRANSLATION_PROVIDER_UNAVAILABLE"
 
 
 def test_microsoft_provider_posts_translator_body_in_order(monkeypatch):
@@ -247,6 +361,9 @@ class FakeTranslationRouter:
         from backend.translation import TranslationSelection
 
         return TranslationSelection(self.provider, "fake", "fast")
+
+    def resolve_all(self, **_kwargs):
+        return [self.resolve()]
 
 
 class FakeTranscriptionProvider:

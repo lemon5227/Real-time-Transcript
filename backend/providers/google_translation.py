@@ -14,6 +14,24 @@ except ImportError:  # pragma: no cover - exercised in a core-only install
     requests = None
 
 
+def _looks_like_html(response) -> bool:
+    """True when a supposedly-JSON endpoint answered with a web page."""
+    content_type = ""
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        try:
+            content_type = str(headers.get("Content-Type", "")).lower()
+        except (AttributeError, TypeError):
+            content_type = ""
+    if "html" in content_type:
+        return True
+    try:
+        body = response.text if hasattr(response, "text") else ""
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return str(body).lstrip()[:1] == "<"
+
+
 class GoogleTranslationProvider:
     name = "google"
     mode = "fast"
@@ -33,6 +51,15 @@ class GoogleTranslationProvider:
         self.location = location.strip() or "global"
         self.timeout_seconds = timeout_seconds
         self._http = http_client
+
+    @property
+    def best_effort(self) -> bool:
+        """Without a key this is the undocumented web endpoint, not a service.
+
+        It answers with consent/verification HTML often enough that it must never
+        outrank a provider the operator actually configured.
+        """
+        return not self.api_key
 
     def translate_batch(
         self, texts: Sequence[str], source_language: str, target_language: str
@@ -106,6 +133,16 @@ class GoogleTranslationProvider:
                     continue
                 if response.status_code >= 400:
                     raise map_translation_response_error(response.status_code)
+                if _looks_like_html(response):
+                    # Google answers the undocumented endpoint with a 200 and a
+                    # consent/verification page once it decides to throttle.
+                    # Reporting that as "invalid format" sent people hunting for a
+                    # parser bug instead of configuring a real provider.
+                    raise ProviderError(
+                        "TRANSLATION_PUBLIC_UNAVAILABLE",
+                        "Google 公共翻译已不可用（返回验证页）",
+                        "配置 Google 官方 API Key，或改用 Microsoft Translator",
+                    )
                 payload = response.json()
                 translated = self._parse_public_translation(payload)
                 if not translated:
