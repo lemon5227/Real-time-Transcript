@@ -5,6 +5,9 @@ import pytest
 from quickstart import BootstrapProfile, missing_cloud_settings, select_profile
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_auto_selects_mlx_on_apple_silicon():
     profile = select_profile("auto", "Darwin", "arm64", False)
     assert profile == BootstrapProfile("auto", "requirements-mac.txt", "Mac MLX")
@@ -40,3 +43,11 @@ def test_missing_cloud_settings_only_returns_variable_names(tmp_path: Path):
     env_path.write_text("CLOUD_BASE_URL=https://example.test/v1\nCLOUD_API_KEY=secret\n", encoding="utf-8")
 
     assert missing_cloud_settings(env_path) == ["CLOUD_TRANSCRIPTION_MODEL"]
+
+
+def test_windows_launcher_translates_power_shell_mode_switch():
+    content = (ROOT / "quickstart.ps1").read_text(encoding="utf-8")
+
+    assert "param(" in content
+    assert "ValidateSet(\"auto\", \"local\", \"cloud\")" in content
+    assert "--mode $Mode" in content
