@@ -67,6 +67,7 @@ class AppConfig:
     audio_overlap_seconds: float
     audio_vad_threshold: float
     audio_glossary: Tuple[str, ...]
+    audio_startup_timeout_seconds: float
 
     @property
     def cloud_configured(self) -> bool:
@@ -118,6 +119,7 @@ class AppConfig:
                 "overlap_seconds": self.audio_overlap_seconds,
                 "vad_threshold": self.audio_vad_threshold,
                 "glossary": list(self.audio_glossary),
+                "startup_timeout_seconds": self.audio_startup_timeout_seconds,
             },
             "translation": {
                 "google": {
@@ -168,6 +170,12 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         ).split(",")
         if origin.strip()
     )
+    # Managed hosts publish the public URL only once the container is running,
+    # so it cannot be written into the image. Without it a deployed instance
+    # would reject its own browser origin.
+    external_url = source.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    if external_url and external_url not in origins:
+        origins += (external_url,)
     window_seconds = _parse_float(
         source.get("AUDIO_WINDOW_SECONDS", "3.0"), "AUDIO_WINDOW_SECONDS", 0.2
     )
@@ -235,4 +243,7 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         audio_overlap_seconds=overlap_seconds,
         audio_vad_threshold=normalize_threshold(source.get("AUDIO_VAD_THRESHOLD")),
         audio_glossary=parse_glossary(source.get("AUDIO_GLOSSARY", "")),
+        audio_startup_timeout_seconds=_parse_float(
+            source.get("AUDIO_STARTUP_TIMEOUT_SECONDS", "45"), "AUDIO_STARTUP_TIMEOUT_SECONDS", 1.0
+        ),
     )

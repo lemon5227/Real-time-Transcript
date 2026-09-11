@@ -1,6 +1,7 @@
 import base64
 import binascii
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import List
 
 import numpy as np
@@ -8,6 +9,24 @@ import numpy as np
 from .models import SUPPORTED_SAMPLE_RATES
 
 TARGET_SAMPLE_RATE = 16000
+
+# Half-width of the low-pass applied before decimation. Wide enough to keep the
+# stopband well down for speech, short enough to run on every captured chunk.
+_ANTIALIAS_HALF_WIDTH = 32
+
+
+@lru_cache(maxsize=8)
+def _antialias_taps(cutoff: float, half_width: int) -> np.ndarray:
+    """Windowed-sinc low-pass coefficients for decimation.
+
+    ``cutoff`` is the target Nyquist expressed as a fraction of the source
+    sample rate.
+    """
+    offsets = np.arange(-half_width, half_width + 1, dtype=np.float64)
+    ideal = 2 * cutoff * np.sinc(2 * cutoff * offsets)
+    window = 0.54 + 0.46 * np.cos(np.pi * offsets / half_width)
+    taps = ideal * window
+    return (taps / taps.sum()).astype(np.float32)
 
 
 def resample_audio(
@@ -26,6 +45,15 @@ def resample_audio(
     audio = audio.reshape(-1)
     if audio.size == 0 or src_rate == target_rate:
         return audio.astype(np.float32, copy=False)
+
+    if src_rate > target_rate:
+        # Anything above the target Nyquist cannot survive resampling and would
+        # otherwise fold back into the band the model actually listens to, where
+        # it sounds like speech the lecturer never said.
+        cutoff = 0.5 * target_rate / src_rate
+        audio = np.convolve(
+            audio, _antialias_taps(cutoff, _ANTIALIAS_HALF_WIDTH), mode="same"
+        ).astype(np.float32, copy=False)
 
     target_length = max(1, int(round(audio.shape[0] * target_rate / src_rate)))
     x_old = np.linspace(0.0, 1.0, num=audio.shape[0], endpoint=False)

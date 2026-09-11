@@ -9,6 +9,7 @@ try:
 except ImportError:  # pragma: no cover - exercised in a core-only install
     requests = None
 
+from ..glossary import Glossary
 from ..models import SessionConfig, TranscriptSegment
 from .base import ProviderError
 
@@ -71,6 +72,12 @@ class CloudTranscriptionProvider:
             "language": self._config.language,
             "response_format": "json",
         }
+        # The course vocabulary helps the endpoint spell the names it has never
+        # seen, the same way it is passed to a local model as an initial prompt.
+        # Spelling correction afterwards still runs as a second line of defence.
+        prompt = Glossary(self._config.glossary).prompt
+        if prompt:
+            data["prompt"] = prompt
         try:
             response = requests.post(
                 url,

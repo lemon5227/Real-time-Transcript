@@ -1,12 +1,23 @@
 import base64
 import queue
 import threading
+import time
 
 import pytest
 
 from backend.models import SessionConfig, TranscriptSegment
 from backend.providers.base import ProviderError
 from backend.session_manager import SessionManager
+
+
+def _speech(frames):
+    """Base64 PCM16 of audible speech at about -12 dBFS.
+
+    The voice gate now drops near-silent windows before the provider sees them,
+    so tests that exercise transcription have to push audio with real level
+    instead of the digital silence these used to send.
+    """
+    return base64.b64encode(b"\x40\x1f" * frames).decode()  # 8000 as int16 LE
 
 
 class FakeProvider:
@@ -57,7 +68,7 @@ def test_start_returns_before_provider_is_ready_and_replays_queued_audio():
     assert started.wait(timeout=1)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 3200).decode(),
+        _speech(3200),
         16000,
         0,
     )
@@ -67,6 +78,12 @@ def test_start_returns_before_provider_is_ready_and_replays_queued_audio():
     assert result_holder
     assert result_holder[0]["status"] == "starting"
     assert result_holder[0]["ready"] is False
+
+    # The worker runs on its own thread. Wait for it to replay the queued audio
+    # before stopping, otherwise this only passes on a lucky schedule.
+    deadline = time.monotonic() + 2.0
+    while not received and time.monotonic() < deadline:
+        time.sleep(0.01)
     manager.stop("sid-1")
     assert received
     ready = [payload for event, payload in events if event == "transcription_ready"]
@@ -127,7 +144,7 @@ def test_audio_queue_backpressure_drops_oldest_frame_without_failing_session():
 
     dropped = manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 160).decode(),
+        _speech(160),
         sample_rate=16000,
         sequence=1,
     )
@@ -161,7 +178,7 @@ def test_contiguous_provider_receives_adjacent_windows_without_whisper_overlap()
     manager.start("sid-1", config)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 24000).decode(),
+        _speech(24000),
         sample_rate=16000,
         sequence=1,
     )
@@ -194,7 +211,7 @@ def test_provider_starts_and_pushes_on_the_same_worker_thread():
     manager.start("sid-1", config)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 3200).decode(),
+        _speech(3200),
         sample_rate=16000,
         sequence=1,
     )
@@ -225,7 +242,7 @@ def test_contiguous_provider_timestamps_are_not_offset_twice():
     manager.start("sid-1", config)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 32000).decode(),
+        _speech(32000),
         sample_rate=16000,
         sequence=1,
     )
@@ -256,7 +273,7 @@ def test_provisional_segments_are_emitted_but_not_saved_as_history():
     manager.start("sid-1", config)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 3200).decode(),
+        _speech(3200),
         sample_rate=16000,
         sequence=1,
     )
@@ -266,6 +283,82 @@ def test_provisional_segments_are_emitted_but_not_saved_as_history():
     emitted_segments = [payload for event, payload in emitted if event == "transcript_segment"]
     assert {item["id"] for item in emitted_segments} == {"draft-1", "final-1"}
     assert [item["id"] for item in result["segments"]] == ["final-1"]
+
+
+def test_stop_admits_the_worker_is_still_loading_the_model():
+    """Stopping during model load must not report a clean shutdown.
+
+    Claiming success hides the fact that nothing was ever transcribed, and the
+    worker used to announce itself ready long after the class had ended.
+    """
+    emitted = []
+
+    class SlowProvider(FakeProvider):
+        def start(self, config):
+            time.sleep(0.5)
+
+    manager = SessionManager(
+        provider_factory=lambda _config: SlowProvider(),
+        emit=lambda _sid, event, _payload: emitted.append(event),
+    )
+    config = SessionConfig("local", "fake", "en", 16000, stop_timeout_seconds=0.05)
+    manager.start("sid-1", config)
+
+    result = manager.stop("sid-1")
+
+    assert result["status"] == "stopping"
+    assert result["detail"]
+    # Once the model finally loads, the dead session must stay silent.
+    time.sleep(0.9)
+    assert emitted == []
+
+
+def test_a_model_that_never_becomes_ready_is_reported_as_a_timeout():
+    """The UI must not wait forever on a model that will not load.
+
+    The worker blocks inside provider startup, so the timeout is measured
+    against arriving audio instead of from inside the worker.
+    """
+    emitted = []
+
+    class HangingProvider(FakeProvider):
+        def start(self, config):
+            time.sleep(0.5)
+
+    manager = SessionManager(
+        provider_factory=lambda _config: HangingProvider(),
+        emit=lambda _sid, event, payload: emitted.append((event, payload)),
+        startup_timeout_seconds=0.05,
+    )
+    manager.start("sid-1", SessionConfig("local", "fake", "en", 16000))
+
+    time.sleep(0.15)
+    manager.push_audio("sid-1", _speech(3200), 16000, 1)
+
+    errors = [payload for event, payload in emitted if event == "transcription_error"]
+    assert errors, "a model that never loads must be reported"
+    assert errors[0]["code"] == "PROVIDER_START_TIMEOUT"
+    # Reported once, not on every chunk.
+    manager.push_audio("sid-1", _speech(3200), 16000, 2)
+    assert len([p for e, p in emitted if e == "transcription_error"]) == 1
+    manager.stop("sid-1")
+
+
+def test_restarting_after_a_slow_stop_stays_usable():
+    """Stop while the model loads, start again: the app must recover."""
+    class SlowProvider(FakeProvider):
+        def start(self, config):
+            time.sleep(0.3)
+
+    manager = SessionManager(provider_factory=lambda _config: SlowProvider())
+    config = SessionConfig("local", "fake", "en", 16000, stop_timeout_seconds=0.05)
+
+    manager.start("sid-1", config)
+    assert manager.stop("sid-1")["status"] == "stopping"
+
+    assert manager.start("sid-1", config)["status"] == "starting"
+    time.sleep(0.5)
+    assert manager.stop("sid-1")["status"] == "success"
 
 
 def test_capture_offset_places_segments_on_the_recording_timeline():
@@ -287,7 +380,7 @@ def test_capture_offset_places_segments_on_the_recording_timeline():
     manager.start("sid-1", config)
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 32000).decode(),
+        _speech(32000),
         sample_rate=16000,
         sequence=1,
         offset_ms=8000,
@@ -327,7 +420,7 @@ def test_dropped_audio_keeps_recording_timeline_aligned():
     for sequence in range(1, 6):
         dropped = manager.push_audio(
             "sid-1",
-            base64.b64encode(b"\x00\x00" * 16000).decode(),
+            _speech(16000),
             16000,
             sequence,
             offset_ms=(sequence - 1) * 1000,
@@ -361,7 +454,7 @@ def test_capture_offset_skips_audio_dropped_before_the_model_started():
     # receives is already 12s into the recording.
     manager.push_audio(
         "sid-1",
-        base64.b64encode(b"\x00\x00" * 16000).decode(),
+        _speech(16000),
         16000,
         sequence=1,
         offset_ms=12000,

@@ -303,10 +303,9 @@ def test_socket_translation_uses_server_segment_text():
     )["status"] == "starting"
 
     import base64
-    import struct
     import time
 
-    pcm = struct.pack("<" + "h" * 3200, *([0] * 3200))
+    pcm = b"\x40\x1f" * 3200  # 有声，避免被静音门丢弃
     client.emit("audio_chunk", {"audio": base64.b64encode(pcm).decode(), "sample_rate": 16000, "sequence": 0})
     time.sleep(0.1)
     result = client.emit(

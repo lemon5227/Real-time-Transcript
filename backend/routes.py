@@ -129,6 +129,7 @@ def register_routes(app: Flask, config: AppConfig) -> None:
                 "window_seconds": config.audio_window_seconds,
                 "overlap_seconds": config.audio_overlap_seconds,
                 "vad_threshold": config.audio_vad_threshold,
+                "startup_timeout_seconds": config.audio_startup_timeout_seconds,
             },
             "translation": config.public_dict()["translation"],
         })

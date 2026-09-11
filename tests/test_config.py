@@ -14,6 +14,16 @@ def test_default_audio_queue_covers_model_startup_buffer():
     assert config.audio_max_queue == 64
 
 
+def test_startup_timeout_is_configurable_and_reaches_the_browser():
+    """The browser buffers audio for exactly as long as the backend waits."""
+    config = load_config({})
+    assert config.audio_startup_timeout_seconds == 45.0
+    assert config.public_dict()["audio"]["startup_timeout_seconds"] == 45.0
+
+    configured = load_config({"AUDIO_STARTUP_TIMEOUT_SECONDS": "20"})
+    assert configured.audio_startup_timeout_seconds == 20.0
+
+
 def test_public_config_never_contains_api_key():
     config = load_config({
         "CLOUD_BASE_URL": "https://example.test/v1",

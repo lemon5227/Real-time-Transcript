@@ -9,6 +9,8 @@ keeps its length, so the transcript timeline stays truthful.
 
 from __future__ import annotations
 
+from typing import Tuple
+
 import numpy as np
 
 # Roughly -66 dBFS. Deliberately conservative: it must only catch the noise floor
@@ -44,13 +46,20 @@ class VoiceGate:
         self.threshold = normalize_threshold(threshold)
         self.skipped_seconds = 0.0
 
-    def filter(self, audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
+    def filter(self, audio: np.ndarray, sample_rate: int = 16000) -> Tuple[np.ndarray, bool]:
+        """Return the audio to hand to the model and whether it was silence.
+
+        The caller needs the decision and not just the audio. A windowed
+        provider can skip a silent window outright, which is what actually saves
+        the inference; a streaming provider still has to receive the zeros so its
+        timeline keeps covering the recording.
+        """
         array = np.asarray(audio, dtype=np.float32).reshape(-1)
         if not self.enabled or array.size == 0:
-            return array
+            return array, False
         if rms(array) > self.threshold:
-            return array
+            return array, False
         self.skipped_seconds += array.size / float(sample_rate or 16000)
-        # Same shape and dtype, so the provider advances its timeline as if it
-        # had received the real silence.
-        return np.zeros_like(array)
+        # Same shape and dtype, so a streaming provider advances its timeline as
+        # if it had received the real silence.
+        return np.zeros_like(array), True

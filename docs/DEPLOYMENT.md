@@ -111,6 +111,30 @@ TRANSCRIPT_PORT=5002 docker compose up --build
 Open <http://localhost:5002/>. `TRANSCRIPT_PORT` changes the host port only;
 the container continues to listen on `5001`.
 
+## Allowed browser origins
+
+Both the HTTP API and the live transcription socket follow `CORS_ORIGINS`.
+An origin that is not listed is refused, which is what keeps an unrelated web
+page from driving a local server: starting transcription, downloading models and
+spending the configured translation quota.
+
+The default covers `http://127.0.0.1:5001` and `http://localhost:5001`. Set the
+variable whenever the page is opened from another address, for example a LAN
+address, another port, or a public hostname:
+
+```dotenv
+CORS_ORIGINS=https://transcript.example.com
+```
+
+Compose derives the entry from `TRANSCRIPT_PORT`, so a port override needs no
+extra work. On Render the service URL is added automatically from
+`RENDER_EXTERNAL_URL`, which the platform sets while the container runs; to
+serve a custom domain instead, set `CORS_ORIGINS` to that domain.
+
+If transcription never starts but the page loads, the browser origin is the
+first thing to check: the socket handshake is refused with HTTP 400 before any
+audio is sent.
+
 ## Render one-click deployment
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/lemon5227/Real-time-Transcript)

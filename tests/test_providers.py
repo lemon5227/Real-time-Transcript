@@ -1,3 +1,4 @@
+import base64
 import importlib
 import sys
 from types import SimpleNamespace
@@ -139,6 +140,125 @@ def test_cloud_provider_posts_audio_without_logging_secret(monkeypatch):
     segments = provider.push(np.zeros(16000, dtype=np.float32))
     assert segments[0].text == "Cloud result"
     assert captured["headers"]["Authorization"] == "Bearer secret-value"
+
+
+def test_local_provider_drops_windows_the_model_calls_no_speech(monkeypatch):
+    """Whisper invents fluent sentences on silence; those are not captions."""
+
+    class FakeSegment:
+        def __init__(self, text, no_speech_prob):
+            self.text = text
+            self.no_speech_prob = no_speech_prob
+            self.start = 0.0
+            self.end = 1.0
+
+    class FakeWhisperModel:
+        def __init__(self, _name, device, compute_type):
+            pass
+
+        def transcribe(self, _audio, **_kwargs):
+            return [
+                FakeSegment("Thank you for watching", 0.97),
+                FakeSegment("today we cover gradient descent", 0.02),
+            ], None
+
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel)
+    )
+    from backend.providers.local_whisper import LocalWhisperProvider
+
+    provider = LocalWhisperProvider(model_name="small", device="cpu")
+    provider.start(SessionConfig("local", "small", "en", 16000))
+    segments = provider.push(np.full(16000, 0.2, dtype=np.float32))
+
+    assert [segment.text for segment in segments] == ["today we cover gradient descent"]
+
+
+def test_cloud_provider_sends_the_course_vocabulary(monkeypatch):
+    """Cloud mode has to hint the endpoint, not only correct spelling later."""
+    from backend.providers.cloud_transcription import CloudTranscriptionProvider
+
+    sent = {}
+
+    def fake_post(url, headers, files, data, timeout):
+        sent.update(data)
+        return FakeResponse({"text": "Cloud result"})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    provider = CloudTranscriptionProvider(
+        base_url="https://example.test/v1",
+        api_key="secret-value",
+        model="transcribe-test",
+        timeout_seconds=5,
+    )
+    provider.start(SessionConfig("cloud", None, "en", 16000, glossary=("Backpropagation",)))
+    provider.push(np.full(16000, 0.2, dtype=np.float32))
+
+    assert "Backpropagation" in sent.get("prompt", "")
+
+
+def test_cloud_provider_omits_the_prompt_when_no_vocabulary_is_set(monkeypatch):
+    from backend.providers.cloud_transcription import CloudTranscriptionProvider
+
+    sent = {}
+
+    def fake_post(url, headers, files, data, timeout):
+        sent.update(data)
+        return FakeResponse({"text": "Cloud result"})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    provider = CloudTranscriptionProvider(
+        base_url="https://example.test/v1",
+        api_key="secret-value",
+        model="transcribe-test",
+        timeout_seconds=5,
+    )
+    provider.start(SessionConfig("cloud", None, "en", 16000))
+    provider.push(np.full(16000, 0.2, dtype=np.float32))
+
+    assert "prompt" not in sent
+
+
+def test_cloud_provider_is_not_called_for_silent_windows(monkeypatch):
+    """A quiet room must not cost a request.
+
+    The windowed provider is skipped before inference, so a lecture full of
+    pauses only pays for the parts that carry speech.
+    """
+    from backend.providers.cloud_transcription import CloudTranscriptionProvider
+    from backend.session_manager import SessionManager
+
+    calls = []
+
+    def fake_post(url, headers, files, data, timeout):
+        calls.append(url)
+        return FakeResponse({"text": "Cloud result"})
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    def build(_config):
+        return CloudTranscriptionProvider(
+            base_url="https://example.test/v1",
+            api_key="secret-value",
+            model="transcribe-test",
+            timeout_seconds=5,
+        )
+
+    manager = SessionManager(provider_factory=build)
+    config = SessionConfig(
+        "cloud", None, "en", 16000, window_seconds=1.0, overlap_seconds=0.0, enable_vad=True
+    )
+    manager.start("sid-1", config)
+    # One second of room tone (8/32768, about -72 dBFS) then one second of speech.
+    manager.push_audio(
+        "sid-1", base64.b64encode(b"\x08\x00" * 16000).decode(), 16000, sequence=1, offset_ms=0
+    )
+    manager.push_audio(
+        "sid-1", base64.b64encode(b"\x40\x1f" * 16000).decode(), 16000, sequence=2, offset_ms=1000
+    )
+    manager.stop("sid-1")
+
+    assert len(calls) == 1
 
 
 def test_auto_provider_falls_back_when_local_model_cannot_start():

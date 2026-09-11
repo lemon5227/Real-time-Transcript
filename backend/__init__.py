@@ -18,7 +18,7 @@ from .routes import LOCAL_MODELS, register_routes, register_socket_handlers
 from .session_manager import SessionManager
 from .translation import ModelTranslationProvider, TranslationRouter
 
-socketio = SocketIO(async_mode="threading", cors_allowed_origins="*")
+socketio = SocketIO(async_mode="threading")
 
 
 def create_app(
@@ -45,6 +45,7 @@ def create_app(
     manager = SessionManager(
         provider_factory or ProviderFactory(app_config),
         emit=lambda sid, event, payload: socketio.emit(event, payload, to=sid),
+        startup_timeout_seconds=app_config.audio_startup_timeout_seconds,
     )
     model_manager = ModelManager(LOCAL_MODELS)
     translation_router = translation_router or _create_translation_router(app_config)
@@ -56,7 +57,12 @@ def create_app(
     if not getattr(socketio, "_rtt_handlers_registered", False):
         register_socket_handlers(socketio)
         socketio._rtt_handlers_registered = True
-    socketio.init_app(app)
+    # The socket has to follow the same origin policy as the HTTP API. Left open
+    # it let any web page drive the local server: start transcription, download
+    # models and spend the configured translation quota.
+    socketio.init_app(
+        app, cors_allowed_origins=list(app_config.cors_origins) or "*"
+    )
     return app
 
 

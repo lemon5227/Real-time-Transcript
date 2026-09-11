@@ -16,6 +16,12 @@ def local_model_available(_model_name: str) -> bool:
     )
 
 
+# Whisper reliably invents plausible sentences on silence and room noise, and it
+# reports the confidence that a window holds no speech. Only near-certain
+# non-speech is dropped, so a quiet or mumbled sentence still gets captioned.
+MAX_NO_SPEECH_PROBABILITY = 0.85
+
+
 class LocalWhisperProvider:
     name = "local"
 
@@ -150,11 +156,17 @@ class LocalWhisperProvider:
                 text = str(raw.get("text", "")).strip()
                 start = float(raw.get("start", 0.0))
                 end = float(raw.get("end", start))
+                no_speech = float(raw.get("no_speech_prob", 0.0) or 0.0)
             else:
                 text = str(getattr(raw, "text", "")).strip()
                 start = float(getattr(raw, "start", 0.0))
                 end = float(getattr(raw, "end", start))
+                no_speech = float(getattr(raw, "no_speech_prob", 0.0) or 0.0)
             if not text:
+                continue
+            if no_speech > MAX_NO_SPEECH_PROBABILITY:
+                # The model is close to certain this window holds no speech, so
+                # the text is a hallucination rather than a missed word.
                 continue
             self._segment_number += 1
             result.append(

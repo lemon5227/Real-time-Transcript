@@ -6,6 +6,16 @@ from backend import create_app, socketio
 from backend.models import TranscriptSegment
 
 
+def _speech(frames):
+    """Base64 PCM16 of audible speech at about -12 dBFS.
+
+    The voice gate now drops near-silent windows before the provider sees them,
+    so tests that exercise transcription have to push audio with real level
+    instead of the digital silence these used to send.
+    """
+    return base64.b64encode(b"\x40\x1f" * frames).decode()  # 8000 as int16 LE
+
+
 def wait_for_event(client, name, timeout=2.0):
     """Collect socket events until the worker thread has emitted ``name``.
 
@@ -82,7 +92,7 @@ def test_socket_accepts_audio_while_provider_is_starting():
     accepted = client.emit(
         "audio_chunk",
         {
-            "audio": base64.b64encode(b"\x00\x00" * 160).decode(),
+            "audio": _speech(160),
             "sample_rate": 16000,
             "sequence": 0,
         },
@@ -119,7 +129,7 @@ def test_socket_applies_the_course_glossary_to_transcribed_text():
         "audio_chunk",
         {
             # The default 3s window needs a full window before the provider runs.
-            "audio": base64.b64encode(b"\x00\x00" * 48000).decode(),
+            "audio": _speech(48000),
             "sample_rate": 16000,
             "sequence": 0,
         },
@@ -134,3 +144,27 @@ def test_socket_applies_the_course_glossary_to_transcribed_text():
     assert segments, "the glossary session must still emit transcript segments"
     assert segments[0]["text"] == "today we cover gradient descent"
     client.disconnect()
+
+
+def test_socket_refuses_origins_outside_the_configured_policy():
+    """Any web page could otherwise drive the local server over the socket.
+
+    Starting transcription, downloading models and calling translation all spend
+    local resources or paid quota, so the socket has to follow the same origin
+    policy the HTTP API already enforces.
+    """
+    app = create_app({"CORS_ORIGINS": "https://class.example.com"})
+    client = app.test_client()
+    try:
+        allowed = client.get(
+            "/socket.io/?EIO=4&transport=polling",
+            headers={"Origin": "https://class.example.com"},
+        )
+        refused = client.get(
+            "/socket.io/?EIO=4&transport=polling",
+            headers={"Origin": "https://elsewhere.test"},
+        )
+        assert allowed.status_code == 200
+        assert refused.status_code == 400
+    finally:
+        create_app({})  # restore the default policy on the shared socket

@@ -26,6 +26,8 @@
   var lectureIntroToggle = $("#toggle-lecture-intro");
   var lectureIntroCompact = $("#lecture-intro-compact");
   var lectureIntroCompactToggle = $("#toggle-lecture-intro-compact");
+  // Fallback only: the real value arrives with /api/capabilities and matches the
+  // backend provider startup timeout.
   var MAX_PENDING_AUDIO_SECONDS = 30;
   var SETTINGS_KEY = "echonote-preferences-v1";
   var UI_STATE_KEY = "echonote-ui-state-v1";
@@ -45,6 +47,7 @@
     audioBuffer: new window.EchoAudioBuffer.PcmChunkBuffer(0.5),
     pendingAudio: [],
     pendingAudioSeconds: 0,
+    pendingAudioLimitSeconds: MAX_PENDING_AUDIO_SECONDS,
     sequence: 0,
     segments: [],
     liveSegment: null,
@@ -455,6 +458,11 @@
 
   function updateCapabilityUi(data) {
     state.capabilities = data;
+    // How long audio may be held while the model loads. Read from the backend so
+    // the browser buffer and the provider startup timeout cannot drift apart.
+    if (data.audio && Number(data.audio.startup_timeout_seconds) > 0) {
+      state.pendingAudioLimitSeconds = Number(data.audio.startup_timeout_seconds);
+    }
     var localAvailable = Boolean(data.local && data.local.available);
     var cloudAvailable = Boolean(data.cloud && data.cloud.configured);
     var runtime = data.local && data.local.runtime ? data.local.runtime : "";
@@ -890,6 +898,15 @@
     if (shouldFollow) scrollToLatest();
   }
 
+  function findFinalArticle(id) {
+    if (!id) return null;
+    var nodes = feed.querySelectorAll(".transcript-segment");
+    for (var index = 0; index < nodes.length; index += 1) {
+      if (nodes[index] !== state.liveArticle && nodes[index].dataset.segmentId === String(id)) return nodes[index];
+    }
+    return null;
+  }
+
   function addSegment(segment) {
     if (!segment || !segment.text) return;
     var isFinal = segment.is_final !== false;
@@ -902,6 +919,26 @@
     }
     var shouldFollow = $("#autoscroll-toggle").checked;
     if (shouldFollow) protectFollowScroll();
+    // The backend sometimes replaces a caption with a more complete decode of
+    // the same audio. It keeps the id, so the existing line is updated in place
+    // instead of adding a second one.
+    var alreadyRendered = findFinalArticle(segment.id);
+    if (alreadyRendered) {
+      var stored = findSegment(segment.id);
+      if (stored) {
+        var changed = stored.text !== segment.text;
+        stored.text = segment.text;
+        stored.start_ms = segment.start_ms;
+        stored.end_ms = segment.end_ms;
+        if (changed) stored.translations = null;
+        renderTranscriptArticle(alreadyRendered, stored, true);
+        if (changed) enqueueTranslation(stored);
+      } else {
+        renderTranscriptArticle(alreadyRendered, segment, true);
+      }
+      scheduleSessionSave();
+      return;
+    }
     state.segments.push(segment);
     var article;
     if (state.liveArticle && sameLiveSegment(segment, state.liveSegment)) {
@@ -1101,7 +1138,7 @@
     state.pendingAudio.push({ buffer: buffer, sampleRate: rate, durationSeconds: durationSeconds, offsetMs: offsetMs });
     state.pendingAudioSeconds += durationSeconds;
     var droppedSeconds = 0;
-    while (state.pendingAudioSeconds > MAX_PENDING_AUDIO_SECONDS && state.pendingAudio.length) {
+    while (state.pendingAudioSeconds > state.pendingAudioLimitSeconds && state.pendingAudio.length) {
       var dropped = state.pendingAudio.shift();
       state.pendingAudioSeconds -= dropped.durationSeconds;
       droppedSeconds += dropped.durationSeconds;

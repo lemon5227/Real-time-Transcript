@@ -1,5 +1,6 @@
 import queue
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Union
@@ -39,6 +40,8 @@ class _SessionState:
     worker: Optional[threading.Thread] = None
     startup_event: threading.Event = field(default_factory=threading.Event)
     startup_error: Optional[Exception] = None
+    startup_deadline: float = 0.0
+    startup_timeout_reported: bool = False
     last_sequence: int = -1
     error: Optional[ProviderError] = None
     timeline: CaptureTimeline = field(default_factory=CaptureTimeline)
@@ -61,17 +64,32 @@ class SessionManager:
         self._max_payload_bytes = max_payload_bytes
         self._startup_timeout_seconds = startup_timeout_seconds
         self._sessions: Dict[str, _SessionState] = {}
+        # Sessions that were asked to stop but whose worker is still winding
+        # down, usually because the model was still loading. Kept so a fast
+        # stop-then-start does not load a second copy of the model alongside the
+        # first one.
+        self._closing: Dict[str, _SessionState] = {}
         self._lock = threading.RLock()
 
     def start(self, sid: str, config: SessionConfig) -> Dict[str, object]:
         with self._lock:
             if sid in self._sessions:
                 raise ValueError("SESSION_ALREADY_ACTIVE: this connection already has a session")
+            pending = self._closing.pop(sid, None)
 
+        if pending is not None and pending.worker is not None and pending.worker.is_alive():
+            # The previous session on this connection is still loading its model.
+            # Give it a moment rather than loading a second copy beside it.
+            pending.worker.join(timeout=config.stop_timeout_seconds)
+
+        with self._lock:
+            if sid in self._sessions:
+                raise ValueError("SESSION_ALREADY_ACTIVE: this connection already has a session")
             provider = self._make_provider(config)
             state = _SessionState(
                 sid=sid,
                 session_id="session-" + uuid.uuid4().hex,
+                startup_deadline=time.monotonic() + self._startup_timeout_seconds,
                 config=config,
                 provider=provider,
                 audio_buffer=None,
@@ -85,14 +103,14 @@ class SessionManager:
                 daemon=True,
             )
             self._sessions[sid] = state
-            state.worker.start()
-            return {
-                "status": "starting",
-                "ready": False,
-                "session_id": state.session_id,
-                "provider": getattr(provider, "name", "unknown"),
-                "model": getattr(provider, "model", None),
-            }
+        state.worker.start()
+        return {
+            "status": "starting",
+            "ready": False,
+            "session_id": state.session_id,
+            "provider": getattr(provider, "name", "unknown"),
+            "model": getattr(provider, "model", None),
+        }
 
     def push_audio(
         self,
@@ -111,6 +129,7 @@ class SessionManager:
             state.last_sequence = sequence
             state.timeline.observe(offset_ms)
 
+        self._check_startup_timeout(state)
         audio = decode_pcm16_base64(
             encoded_audio,
             sample_rate=sample_rate,
@@ -145,17 +164,30 @@ class SessionManager:
         self._enqueue_stop(state)
         if state.worker is not None:
             state.worker.join(timeout=state.config.stop_timeout_seconds)
+        # A worker still alive here is one whose model never finished loading.
+        # Reporting success would claim the session closed cleanly when it did
+        # not, so the caller is told the shutdown is still in progress.
+        still_closing = state.worker is not None and state.worker.is_alive()
 
         with self._lock:
             self._sessions.pop(sid, None)
+            if still_closing:
+                self._closing[sid] = state
 
         result: Dict[str, object] = {
-            "status": "success" if state.error is None else "error",
+            "status": (
+                "stopping" if still_closing else "success" if state.error is None else "error"
+            ),
             "session_id": state.session_id,
             "segments": [segment.to_dict() for segment in state.merger.all_segments()],
         }
+        if state.voice_gate is not None:
+            # Makes the quiet-room saving visible instead of silently counted.
+            result["silence_skipped_seconds"] = round(state.voice_gate.skipped_seconds, 2)
         if state.error is not None:
             result["error"] = state.error.to_dict()
+        if still_closing:
+            result["detail"] = "模型仍在加载，稍后会自动释放"
         return result
 
     def cleanup(self, sid: str) -> None:
@@ -176,6 +208,27 @@ class SessionManager:
                 raise ValueError("TRANSLATION_SEGMENT_NOT_FINAL: only final segments can be translated")
             result.append({"id": segment.id, "text": segment.text})
         return result
+
+    def _check_startup_timeout(self, state: _SessionState) -> None:
+        """Fail a session whose model never becomes ready.
+
+        The worker blocks inside provider startup, so it cannot time itself out.
+        Audio keeps arriving while the model loads, which makes every chunk a
+        heartbeat this can measure against. Without it the UI waits forever on a
+        model that will not load and buffers audio the whole time.
+        """
+        if state.startup_event.is_set() or state.startup_timeout_reported:
+            return
+        if time.monotonic() < state.startup_deadline:
+            return
+        state.startup_timeout_reported = True
+        error = ProviderError(
+            "PROVIDER_START_TIMEOUT",
+            "模型启动超时，仍未开始转录",
+            "降低模型大小、检查本地依赖，或切换到云端模式",
+        )
+        state.error = error
+        self._emit(state.sid, "transcription_error", error.to_dict())
 
     def _make_provider(self, config: SessionConfig) -> TranscriptionProvider:
         factory = self._provider_factory
@@ -199,6 +252,11 @@ class SessionManager:
             # MLX streams are thread-affine. Keep provider startup, inference,
             # flush, and close on this same worker thread.
             state.provider.start(state.config)
+            if state.stop_event.is_set():
+                # Stopped while the model was still loading. Announcing a ready
+                # session now would revive a session the client already ended.
+                state.startup_event.set()
+                return
             state.audio_buffer = AudioWindowBuffer(
                 window_seconds=state.config.window_seconds,
                 overlap_seconds=(
@@ -281,14 +339,21 @@ class SessionManager:
             try:
                 state.provider.close()
             finally:
+                with self._lock:
+                    self._closing.pop(state.sid, None)
                 state.finished_event.set()
 
     def _process_window(self, state: _SessionState, window: AudioWindow) -> None:
         audio = window.audio
+        silent = False
         if state.voice_gate is not None:
-            # Silence is passed on as zeros so the provider timeline still covers
-            # the recorded span and captions keep their position.
-            audio = state.voice_gate.filter(audio)
+            audio, silent = state.voice_gate.filter(audio)
+        if silent and not getattr(state.provider, "requires_contiguous_audio", False):
+            # A windowed provider can skip the window entirely. Its caption
+            # positions come from the window offset rather than from the audio it
+            # received, so skipping costs nothing and saves the request or the
+            # inference. A streaming provider must still see the zeros below.
+            return
         segments = state.provider.push(audio)
         # Stateful providers such as Parakeet already maintain a continuous
         # timeline. Windowed providers return offsets relative to this window.
@@ -322,7 +387,7 @@ class SessionManager:
                     confidence=segment.confidence,
                 )
             )
-        for segment in state.merger.add(final_segments, 0):
+        for segment in state.merger.add(final_segments):
             self._emit(state.sid, "transcript_segment", segment.to_dict())
         for segment in segments:
             if segment.is_final:

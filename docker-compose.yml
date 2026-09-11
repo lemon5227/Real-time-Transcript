@@ -10,6 +10,9 @@ services:
       HOST: 0.0.0.0
       PORT: "5001"
       TRANSCRIPTION_MODE: ${DOCKER_TRANSCRIPTION_MODE:-cloud}
+      # Follows the published port: the browser origin has to be allowed for the
+      # live socket as well as for the HTTP API.
+      CORS_ORIGINS: http://localhost:${TRANSCRIPT_PORT:-5001},http://127.0.0.1:${TRANSCRIPT_PORT:-5001}
     ports:
       - "${TRANSCRIPT_PORT:-5001}:5001"
     restart: unless-stopped
