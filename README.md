@@ -128,6 +128,39 @@ The browser never receives `CLOUD_API_KEY`. The UI makes the current path visibl
 
 Real-time translation is off by default. When enabled, a best-effort Google public path can work without a key; Google Cloud Translation or Microsoft Translator can provide more stable quick text translation when configured. After class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Precise local translation can use an OpenAI-compatible Ollama/LM Studio endpoint; cloud precise translation uses the configured OpenAI-compatible endpoint. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
 
+### Caption latency on Apple Silicon (MLX)
+
+The Parakeet stream holds audio back before it will confirm a caption. It keeps the last
+`right context` encoder frames as "not yet certain", and one encoder frame is
+`8 (subsampling) × 160 (hop) / 16000 = 0.08s`. The confirmation lag is therefore
+`MLX_STREAM_RIGHT_CONTEXT × 0.08s` — the old hardcoded value of 64 cost 5.12s before a
+single word could appear in the transcript.
+
+```dotenv
+# Streaming model: lower = faster captions, higher = more right context to decode
+MLX_STREAM_RIGHT_CONTEXT=32
+
+# How much audio is handed to a streaming model per inference step
+STREAMING_CHUNK_SECONDS=1.0
+```
+
+Measured on an M-series Mac, ~24s of speech:
+
+| Right context | First confirmed word | Confirmation lag |
+| --- | --- | --- |
+| 64 (old default) | 6.0s | 5.12s |
+| 32 (default) | 3.0s | 2.56s |
+| 16 | 2.0s | 1.28s |
+| 8 | 2.0s | 0.64s |
+
+`STREAMING_CHUNK_SECONDS` only applies to streaming providers. Each inference step has a
+fixed ~0.4s cost, so smaller chunks buy smoother live captions at a CPU price: 3.0s runs
+at 0.19× realtime, 1.0s at 0.42×, and 0.5s at 0.82× — too close to the limit to be the
+default. Windowed providers (cloud, Whisper) ignore it and keep `AUDIO_WINDOW_SECONDS`.
+
+Read [`docs/LATENCY.md`](docs/LATENCY.md) for the full measurements, the end-to-end
+before/after comparison, and the scripts to re-measure on your own machine.
+
 ### Optional Google and Microsoft translation keys
 
 Google Cloud Translation Basic currently lists the first 500,000 characters per month as free, while Azure Translator’s F0 tier currently lists 2,000,000 characters per month free. Both limits, billing requirements and regional availability are controlled by the providers; check their official pricing pages before relying on them for a course. Google’s no-key public path is best-effort only and can be rate-limited.
@@ -177,7 +210,12 @@ Recommended classroom flow:
 - Cloud requests fail: verify the base URL includes the provider API root, the key/model are valid, and the service accepts `POST /audio/transcriptions`.
 - No review records appear: allow IndexedDB/local storage for `127.0.0.1`; live transcription itself does not depend on the review database.
 
+- Captions arrive late: lower `MLX_STREAM_RIGHT_CONTEXT` in the backend `.env`; see [`docs/LATENCY.md`](docs/LATENCY.md) for the measured trade-off.
+- Real-time translation always fails: the keyless Google endpoint is no longer usable, so configure a Microsoft or Google API key.
+
 See [`QUICKSTART.md`](QUICKSTART.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`docs/API.md`](docs/API.md) and [`docs/PRIVACY.md`](docs/PRIVACY.md).
+
+Working on the code rather than using it? [`CHANGELOG.md`](CHANGELOG.md) records what changed and the current project state; [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) is the debugging handbook, including the traps in this project's development environment.
 
 Runtime discovery is available at `/api/capabilities`; the live page is `/` and the review page is `/review`.
 

@@ -45,6 +45,38 @@ Mac 的 MLX 请使用原生启动，Docker 不能直接使用宿主机 Metal。�
 
 端口占用时可以使用 `TRANSCRIPT_PORT=5002 docker compose up --build`，然后打开 `http://localhost:5002/`。完整平台说明见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
+## 字幕延迟调优（Apple Silicon / MLX）
+
+Parakeet 流式解码会先"压住"一段音频才敢确认字幕。它把最后 `右上下文` 个 encoder 帧当作
+"还不能确定"，而 1 个 encoder 帧 = `8（下采样）× 160（hop）/ 16000 = 0.08 秒`，
+所以确认延迟恰好是 `MLX_STREAM_RIGHT_CONTEXT × 0.08 秒`。原先写死的 64 会让字幕
+足足晚 5.12 秒才出现第一个词。
+
+```dotenv
+# 流式模型：越小字幕越快，越大留给模型判定的右上下文越多
+MLX_STREAM_RIGHT_CONTEXT=32
+
+# 每次推理喂给流式模型的音频时长
+STREAMING_CHUNK_SECONDS=1.0
+```
+
+在 M 系列 Mac 上实测（约 24 秒语音）：
+
+| 右上下文 | 第一个确认词出现 | 确认延迟 |
+| --- | --- | --- |
+| 64（旧默认） | 6.0s | 5.12s |
+| 32（现默认） | 3.0s | 2.56s |
+| 16 | 2.0s | 1.28s |
+| 8 | 2.0s | 0.64s |
+
+`STREAMING_CHUNK_SECONDS` 只对流式 provider 生效。每次推理有约 0.4 秒的固定开销，所以
+切得越碎实时字幕越顺滑，但 CPU 代价越高：3.0s 为 0.19 倍实时，1.0s 为 0.42 倍，
+0.5s 为 0.82 倍——已经贴着极限，不适合做默认值。窗口化 provider（云端、Whisper）
+不受它影响，仍用 `AUDIO_WINDOW_SECONDS`。
+
+完整实测数据、改前改后对比，以及在本机自行复测的脚本见
+[`docs/LATENCY.md`](docs/LATENCY.md)。
+
 ## 翻译 API（可选）
 
 当前翻译已经接入 Google 和 Microsoft 两个快速翻译服务。打开右侧设置中的“翻译”，选择“快速翻译”，再选择对应服务即可。

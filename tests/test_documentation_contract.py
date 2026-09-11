@@ -19,3 +19,34 @@ def test_privacy_docs_cover_local_audio_and_text_only_translation():
     docs = (ROOT / "docs/PRIVACY.md").read_text(encoding="utf-8")
     for phrase in ["saves original audio locally", "text-only path", "TRANSLATION_GOOGLE_API_KEY", "clearing site data"]:
         assert phrase in docs
+
+
+def test_change_log_and_maintenance_handbook_stay_reachable():
+    """These exist so the next person can see project state and re-diagnose a fix.
+
+    Asserting the cross-links keeps them from becoming orphan files nobody finds.
+    """
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    maintenance = (ROOT / "docs/MAINTENANCE.md").read_text(encoding="utf-8")
+    troubleshooting = (ROOT / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Current state" in changelog
+    for link in ["docs/MAINTENANCE.md", "docs/LATENCY.md", "TROUBLESHOOTING.md"]:
+        assert link in changelog
+    assert "docs/LATENCY.md" in maintenance
+    assert "CHANGELOG.md" in maintenance
+    assert "docs/MAINTENANCE.md" in troubleshooting
+    assert "CHANGELOG.md" in readme
+
+
+def test_latency_docs_do_not_point_at_missing_probes():
+    """A doc naming a renamed script is worse than no doc."""
+    docs = (ROOT / "docs/LATENCY.md").read_text(encoding="utf-8")
+    for name in [
+        "measure_caption_latency.py",
+        "measure_finalize_lag.py",
+        "measure_translation_latency.py",
+    ]:
+        assert name in docs
+        assert (ROOT / "tools" / name).is_file(), name + " is referenced but missing"
