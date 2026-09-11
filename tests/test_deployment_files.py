@@ -76,3 +76,5 @@ def test_macos_dmg_workflow_builds_and_publishes_artifact():
         "gh release create",
     ]:
         assert token in workflow
+    assert "OUTPUT_DIR: ${{ github.workspace }}/dist" in workflow
+    assert "OUTPUT_DIR: ${{ runner.temp }}" not in workflow

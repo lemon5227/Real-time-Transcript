@@ -17,7 +17,7 @@ jobs:
   build:
     runs-on: macos-14
     env:
-      OUTPUT_DIR: ${{ runner.temp }}/shiju-dist
+      OUTPUT_DIR: ${{ github.workspace }}/dist
       REQUESTED_VERSION: ${{ inputs.version }}
     steps:
       - name: Check out source
@@ -55,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shiju-macos-dmg
-          path: ${{ runner.temp }}/shiju-dist/拾句-macOS.dmg
+          path: dist/拾句-macOS.dmg
           if-no-files-found: error
 
       - name: Publish tagged Release asset
