@@ -107,6 +107,7 @@ const record = context.window.EchoStore.normalizeSession({
 });
 if (record.refinedSegments[0].text !== 'polished') process.exit(1);
 if (record.refinement.status !== 'ready' || record.refinement.provider !== 'mlx') process.exit(2);
+if (record.refinement.error !== '') process.exit(3);
 '''
     result = run_node(script)
     assert result.returncode == 0, result.stderr or result.stdout

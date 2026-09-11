@@ -116,6 +116,16 @@ def test_review_page_exposes_after_class_translation_and_export_modes():
         assert hook in export
 
 
+def test_review_page_exposes_fine_transcription_controls():
+    app = create_app({})
+    html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    for hook in ["refine-transcription", "refine-transcription-status", "transcript-mode-realtime", "transcript-mode-refined"]:
+        assert hook in html
+    for hook in ["refinedSegments", "/api/refine-transcription", "transcriptionMode"]:
+        assert hook in javascript
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript
