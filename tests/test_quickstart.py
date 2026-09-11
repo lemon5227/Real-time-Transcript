@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import quickstart
 from quickstart import BootstrapProfile, missing_cloud_settings, select_profile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,3 +51,27 @@ def test_windows_launcher_translates_power_shell_mode_switch():
     assert "param(" in content
     assert "ValidateSet(\"auto\", \"local\", \"cloud\")" in content
     assert "--mode $Mode" in content
+
+
+def test_mlx_profile_requires_python_310():
+    with pytest.raises(RuntimeError, match=r"Python 3.10\+"):
+        quickstart.validate_python_version((3, 9), "requirements-mac.txt")
+
+
+def test_bootstrap_prefers_compatible_versioned_python(monkeypatch):
+    candidates = [Path("/usr/bin/python3"), Path("/opt/homebrew/bin/python3.12")]
+    versions = {candidates[0]: (3, 9), candidates[1]: (3, 12)}
+    monkeypatch.setattr(quickstart, "python_candidates", lambda: candidates)
+    monkeypatch.setattr(quickstart, "read_python_version", lambda path: versions[path])
+
+    assert quickstart.find_bootstrap_python("requirements-mac.txt") == candidates[1]
+
+
+def test_cli_turns_setup_error_into_actionable_exit(monkeypatch, capsys):
+    def fail(_argv=None):
+        raise RuntimeError("requirements-mac.txt requires Python 3.10+")
+
+    monkeypatch.setattr(quickstart, "main", fail)
+
+    assert quickstart.run_cli([]) == 2
+    assert "Setup could not continue" in capsys.readouterr().err

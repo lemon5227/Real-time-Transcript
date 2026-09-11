@@ -17,7 +17,9 @@
 
 ## Install
 
-Python 3.9+ is supported. `ffmpeg` is not required for microphone transcription.
+Python 3.10+ is recommended for the MLX Parakeet path. Cloud and standard local
+profiles can still run on Python 3.9+. `ffmpeg` is not required for microphone
+transcription, but is required for post-class fine transcription.
 
 ```bash
 git clone https://github.com/lemon5227/Real-time-Transcript.git

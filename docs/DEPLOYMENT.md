@@ -14,6 +14,18 @@ page.
 
 ## Native one-click startup
 
+The MLX Parakeet package requires Python 3.10 or newer. The launcher checks the
+interpreter before installing dependencies and automatically uses an installed
+`python3.10`–`python3.13` when the shell's default `python3` is older. On a Mac
+with only Apple's Python 3.9, install a current interpreter once:
+
+```bash
+brew install python@3.12
+```
+
+Then rerun `./quickstart.sh`; if an earlier failed attempt created `.venv` with
+Python 3.9, the launcher rebuilds that managed environment automatically.
+
 ### macOS/Linux
 
 From the repository root:
