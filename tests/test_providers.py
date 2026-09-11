@@ -1,6 +1,7 @@
 import base64
 import importlib
 import sys
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -351,6 +352,45 @@ def test_mlx_provider_defaults_to_a_usable_right_context():
 
     assert PARAKEET_RIGHT_CONTEXT_DEFAULT == 32
     assert provider.confirmation_lag_seconds() == pytest.approx(2.56)
+
+
+def test_mlx_model_cache_reuses_weights_after_a_session_closes():
+    from backend.providers.mlx_parakeet import MlxModelCache
+
+    calls = []
+    model = object()
+    cache = MlxModelCache(loader=lambda **kwargs: calls.append(kwargs) or model)
+
+    first = cache.acquire("mlx-community/parakeet-tdt-0.6b-v3")
+    cache.release("mlx-community/parakeet-tdt-0.6b-v3")
+    second = cache.acquire("mlx-community/parakeet-tdt-0.6b-v3")
+    cache.release("mlx-community/parakeet-tdt-0.6b-v3")
+
+    assert first is model
+    assert second is model
+    assert calls == [{"model_ref": "mlx-community/parakeet-tdt-0.6b-v3"}]
+
+
+def test_mlx_model_cache_keeps_different_sessions_exclusive():
+    from backend.providers.mlx_parakeet import MlxModelCache
+
+    cache = MlxModelCache(loader=lambda **_: object())
+    cache.acquire("model")
+    acquired = []
+
+    def acquire_second_session():
+        acquired.append(cache.acquire("model"))
+
+    thread = threading.Thread(target=acquire_second_session)
+    thread.start()
+    thread.join(timeout=0.05)
+    assert thread.is_alive()
+
+    cache.release("model")
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    cache.release("model")
+    assert acquired
 
 
 @pytest.mark.parametrize(

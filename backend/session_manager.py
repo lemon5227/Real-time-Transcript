@@ -19,6 +19,27 @@ ProviderFactoryType = Union[Callable[[SessionConfig], TranscriptionProvider], ob
 EmitCallback = Callable[[str, str, Dict[str, object]], None]
 
 
+class AdaptiveStreamingChunkPolicy:
+    """Increase delivery chunks only when the inference worker falls behind."""
+
+    def __init__(self, base_seconds: float, max_seconds: float = 1.5):
+        if base_seconds <= 0:
+            raise ValueError("base_seconds must be positive")
+        self._base_seconds = base_seconds
+        self._max_seconds = max(base_seconds, max_seconds)
+        self.current_seconds = base_seconds
+
+    def observe(self, inference_seconds: float, queued_chunks: int) -> float:
+        overloaded = queued_chunks >= 4 or inference_seconds > self.current_seconds * 0.9
+        has_headroom = queued_chunks == 0 and inference_seconds < self.current_seconds * 0.55
+        if overloaded and self.current_seconds < self._max_seconds:
+            self.current_seconds = min(self._max_seconds, self.current_seconds + 0.25)
+        elif has_headroom and self.current_seconds > self._base_seconds:
+            self.current_seconds = max(self._base_seconds, self.current_seconds - 0.25)
+        self.current_seconds = round(self.current_seconds, 2)
+        return self.current_seconds
+
+
 @dataclass
 class _QueuedAudio:
     audio: np.ndarray
@@ -278,6 +299,11 @@ class SessionManager:
                 ),
                 overlap_seconds=0.0 if contiguous else state.config.overlap_seconds,
             )
+            streaming_policy = (
+                AdaptiveStreamingChunkPolicy(self._streaming_chunk_seconds)
+                if contiguous
+                else None
+            )
             state.voice_gate = VoiceGate(
                 enabled=state.config.enable_vad,
                 threshold=state.config.silence_rms_threshold,
@@ -306,7 +332,15 @@ class SessionManager:
                     break
                 queued = item
                 for window in state.audio_buffer.append(queued.audio, queued.sample_rate):
+                    inference_started = time.monotonic()
                     self._process_window(state, window)
+                    if streaming_policy is not None:
+                        next_seconds = streaming_policy.observe(
+                            time.monotonic() - inference_started,
+                            state.audio_queue.qsize(),
+                        )
+                        if next_seconds != state.audio_buffer.window_seconds:
+                            state.audio_buffer.set_window_seconds(next_seconds)
 
             for window in state.audio_buffer.flush():
                 self._process_window(state, window)

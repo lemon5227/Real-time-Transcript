@@ -104,6 +104,20 @@ class AudioWindowBuffer:
         self._sequence = 0
         self._emitted_window = False
 
+    @property
+    def window_seconds(self) -> float:
+        return self.window_samples / TARGET_SAMPLE_RATE
+
+    def set_window_seconds(self, window_seconds: float) -> None:
+        """Change delivery granularity while preserving the capture timeline."""
+        if window_seconds <= 0:
+            raise ValueError("window_seconds must be positive")
+        overlap_seconds = self.overlap_samples / TARGET_SAMPLE_RATE
+        if overlap_seconds >= window_seconds:
+            raise ValueError("overlap_seconds must be less than window_seconds")
+        self.window_samples = max(1, round(window_seconds * TARGET_SAMPLE_RATE))
+        self.hop_samples = self.window_samples - self.overlap_samples
+
     def append(self, audio: np.ndarray, sample_rate: int) -> List[AudioWindow]:
         normalized = resample_audio(audio, sample_rate)
         if normalized.size:

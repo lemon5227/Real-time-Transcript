@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import threading
 from copy import copy
-from typing import Callable, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -63,6 +64,47 @@ def mlx_runtime_available() -> bool:
         return False
 
 
+class MlxModelCache:
+    """Reuse loaded MLX weights while allowing only one active stream per model."""
+
+    def __init__(self, loader: Optional[Callable[..., object]] = None):
+        self._loader = loader or self._load_default
+        self._models: Dict[str, object] = {}
+        self._locks: Dict[str, threading.Lock] = {}
+        self._guard = threading.RLock()
+
+    @staticmethod
+    def _load_default(model_ref: str) -> object:
+        from parakeet_mlx import from_pretrained
+
+        return from_pretrained(model_ref)
+
+    def acquire(self, model_ref: str) -> object:
+        with self._guard:
+            lock = self._locks.setdefault(model_ref, threading.Lock())
+        lock.acquire()
+        try:
+            with self._guard:
+                model = self._models.get(model_ref)
+            if model is None:
+                model = self._loader(model_ref=model_ref)
+                if model is None:
+                    raise ImportError("parakeet_mlx returned no model")
+                with self._guard:
+                    self._models[model_ref] = model
+            return model
+        except Exception:
+            lock.release()
+            raise
+
+    def release(self, model_ref: str) -> None:
+        with self._guard:
+            lock = self._locks.get(model_ref)
+        if lock is None:
+            raise RuntimeError("MLX model was not acquired")
+        lock.release()
+
+
 class MlxParakeetProvider:
     name = "mlx"
     requires_contiguous_audio = True
@@ -75,9 +117,12 @@ class MlxParakeetProvider:
         model_ref: str,
         loader: Optional[Callable[..., object]] = None,
         right_context: int = PARAKEET_RIGHT_CONTEXT_DEFAULT,
+        model_cache: Optional[MlxModelCache] = None,
     ):
         self.model = model_ref
         self._loader = loader
+        self._model_cache = model_cache
+        self._model_cache_acquired = False
         self._right_context = self._clamp_right_context(right_context)
         self._model = None
         self._stream = None
@@ -91,6 +136,7 @@ class MlxParakeetProvider:
         self._timeline_cursor_ms = 0
         self._last_window_origin_seconds = 0.0
         self._last_draft = ""
+        self._model_cache_acquired = False
 
     @classmethod
     def _clamp_right_context(cls, value: object) -> int:
@@ -123,6 +169,12 @@ class MlxParakeetProvider:
         try:
             if self._loader is not None:
                 self._model = self._loader(model_ref=self.model)
+            elif self._model_cache is not None:
+                import mlx.core as mx
+
+                self._audio_converter = mx.array
+                self._model = self._model_cache.acquire(self.model)
+                self._model_cache_acquired = True
             else:
                 import mlx.core as mx
                 from parakeet_mlx import from_pretrained
@@ -142,8 +194,10 @@ class MlxParakeetProvider:
             )
             self._stream = stream.__enter__()
         except ProviderError:
+            self._release_model_cache()
             raise
         except Exception as exc:
+            self._release_model_cache()
             raise ProviderError(
                 "MLX_RUNTIME_UNAVAILABLE",
                 "Mac MLX 本地转录依赖未安装或模型无法加载",
@@ -481,5 +535,12 @@ class MlxParakeetProvider:
                 stream.__exit__(None, None, None)
             except Exception:
                 pass
+        self._release_model_cache()
         self._model = None
         self._config = None
+
+    def _release_model_cache(self) -> None:
+        if not self._model_cache_acquired or self._model_cache is None:
+            return
+        self._model_cache.release(self.model)
+        self._model_cache_acquired = False

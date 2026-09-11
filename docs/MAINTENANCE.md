@@ -42,6 +42,11 @@ context to decode with; the next lever after that is `max_words_per_segment` in
 Note what does *not* help: changing `AUDIO_WINDOW_SECONDS` moved the end-to-end confirmed
 caption from 11.38s to 11.34s. Window size is not the bottleneck.
 
+The MLX model is cached after the first session, so a second session in the same server process
+should not download or reload the weights. The streaming decoder itself is still recreated for
+every session. Do not remove the cache lease: `transcribe_stream().__enter__()` changes the shared
+encoder attention mode, so concurrent streams must not use the same model object.
+
 ### Captions freeze and then jump in a block
 
 The provider is being fed in oversized chunks. Streaming providers should use
@@ -49,6 +54,10 @@ The provider is being fed in oversized chunks. Streaming providers should use
 `session_manager._run_session` that builds `AudioWindowBuffer`, make sure the
 `requires_contiguous_audio` split is still there — routing the streaming chunk size into the
 windowed path makes cloud and Whisper infer 3× more often for no benefit.
+
+On MLX, the delivery buffer may grow from the configured base to 1.5 seconds when the inference
+queue is falling behind, then shrink back after it recovers. This is intentional; a busy machine
+should catch up while an idle machine keeps frequent draft updates.
 
 ### Translation reports a format error
 

@@ -120,6 +120,16 @@ STREAMING_CHUNK_SECONDS=1.0    # streaming providers only; windowed ones keep AU
 Both are reported through `/api/capabilities` as `audio.streaming_chunk_seconds` and
 `audio.streaming_lag_seconds` so the UI can show the current trade-off instead of guessing.
 
+The MLX worker also adapts delivery size only when it falls behind: it grows from the configured
+base in 0.25-second steps up to 1.5 seconds when the audio queue reaches four chunks or an
+inference call consumes almost the whole delivery interval. When the queue is empty and inference
+has headroom, it returns to the configured base. A normal MacBook therefore keeps the 1-second
+live cadence, while a busy machine can catch up without dropping as much audio.
+
+`ProviderFactory` keeps the loaded Parakeet weights in a process-local cache. Each lecture still
+gets a fresh streaming decoder, but sequential sessions skip the model reload. The cache leases a
+model exclusively because MLX streaming temporarily changes the encoder attention implementation.
+
 Going lower than 16 is a real accuracy risk on lecture vocabulary. If captions still feel slow
 at 16, the next lever is not the model but `max_words_per_segment` in
 `backend/providers/mlx_parakeet.py`, which decides how long a run-on sentence may delay its own

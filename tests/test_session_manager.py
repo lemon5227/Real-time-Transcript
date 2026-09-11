@@ -7,7 +7,7 @@ import pytest
 
 from backend.models import SessionConfig, TranscriptSegment
 from backend.providers.base import ProviderError
-from backend.session_manager import SessionManager
+from backend.session_manager import AdaptiveStreamingChunkPolicy, SessionManager
 
 
 def _speech(frames):
@@ -219,6 +219,16 @@ def test_contiguous_provider_is_fed_in_streaming_chunks_not_window_chunks():
 
     # 1s of audio through a 0.25s window becomes four pushes, not one 3s window.
     assert provider.chunk_sizes == [4000, 4000, 4000, 4000]
+
+
+def test_adaptive_streaming_chunk_policy_only_grows_when_inference_falls_behind():
+    policy = AdaptiveStreamingChunkPolicy(1.0)
+
+    assert policy.observe(inference_seconds=0.35, queued_chunks=0) == 1.0
+    assert policy.observe(inference_seconds=1.1, queued_chunks=4) == 1.25
+    assert policy.observe(inference_seconds=1.1, queued_chunks=4) == 1.5
+    assert policy.observe(inference_seconds=0.2, queued_chunks=0) == 1.25
+    assert policy.observe(inference_seconds=0.2, queued_chunks=0) == 1.0
 
 
 def test_windowed_provider_keeps_the_configured_window_size():

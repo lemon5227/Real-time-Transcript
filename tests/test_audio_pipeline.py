@@ -51,3 +51,15 @@ def test_window_buffer_emits_overlap_windows_and_flushes_tail():
     assert first[0].audio.shape[0] == 16000
     assert tail
     assert tail[-1].sequence > first[0].sequence
+
+
+def test_window_buffer_can_resize_a_contiguous_stream_without_resetting_timeline():
+    buffer = AudioWindowBuffer(window_seconds=1.0, overlap_seconds=0.0)
+    first = buffer.append(np.zeros(16000, dtype=np.float32), 16000)
+
+    buffer.set_window_seconds(1.5)
+    second = buffer.append(np.zeros(24000, dtype=np.float32), 16000)
+
+    assert first[0].start_ms == 0
+    assert second[0].start_ms == 1000
+    assert second[0].audio.shape[0] == 24000
