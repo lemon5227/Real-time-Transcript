@@ -126,6 +126,15 @@ address, another port, or a public hostname:
 CORS_ORIGINS=https://transcript.example.com
 ```
 
+When running the native entry point with a local `PORT`, the matching
+`localhost` and `127.0.0.1` origins are added automatically. For example:
+
+```bash
+PORT=5002 .venv/bin/python app.py
+```
+
+can be opened at <http://127.0.0.1:5002/> without a separate CORS setting.
+
 Compose derives the entry from `TRANSCRIPT_PORT`, so a port override needs no
 extra work. On Render the service URL is added automatically from
 `RENDER_EXTERNAL_URL`, which the platform sets while the container runs; to

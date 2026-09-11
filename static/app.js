@@ -1747,8 +1747,8 @@
 
   function setupTranscriptFollow() {
     var toggle = $("#autoscroll-toggle");
-    var pauseFollowForUserIntent = function () {
-      if (!toggle.checked) return;
+    var pauseFollowForUserIntent = function (event) {
+      if (state.followScrollLock || (event && event.isTrusted === false) || !toggle.checked) return;
       toggle.checked = false;
       updateFollowUi();
     };
@@ -1756,14 +1756,14 @@
       var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24;
       returnLatest.hidden = atBottom;
     });
-    feed.addEventListener("wheel", pauseFollowForUserIntent, { passive: true });
-    feed.addEventListener("touchstart", pauseFollowForUserIntent, { passive: true });
+    feed.addEventListener("wheel", function (event) { pauseFollowForUserIntent(event); }, { passive: true });
+    feed.addEventListener("touchstart", function (event) { pauseFollowForUserIntent(event); }, { passive: true });
     feed.addEventListener("pointerdown", function (event) {
-      if (event.target === feed) pauseFollowForUserIntent();
+      if (event.target === feed) pauseFollowForUserIntent(event);
     }, { passive: true });
     feed.addEventListener("keydown", function (event) {
       if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].indexOf(event.key) !== -1) {
-        pauseFollowForUserIntent();
+        pauseFollowForUserIntent(event);
       }
     });
     returnLatest.addEventListener("click", function () {

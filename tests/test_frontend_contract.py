@@ -275,6 +275,20 @@ def test_live_workbench_follow_does_not_pause_on_programmatic_scroll():
     assert "if (!atBottom && toggle.checked)" not in javascript
 
 
+def test_live_workbench_follow_ignores_programmatic_user_intent_events():
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+
+    assert "if (state.followScrollLock || (event && event.isTrusted === false) || !toggle.checked) return;" in javascript
+    assert "pauseFollowForUserIntent(event)" in javascript
+
+
+def test_latency_probe_reports_streaming_chunk_separately_from_window():
+    probe = (ROOT / "tools/measure_caption_latency.py").read_text(encoding="utf-8")
+
+    assert 'streaming_chunk_seconds = capabilities["audio"]["streaming_chunk_seconds"]' in probe
+    assert "streaming_chunk_seconds" in probe
+
+
 def test_live_workbench_renders_one_updating_live_row_in_history_feed():
     app = create_app({})
     javascript = app.test_client().get("/static/app.js").get_data(as_text=True)

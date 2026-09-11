@@ -69,6 +69,7 @@ with wave.open(AUDIO_PATH, "rb") as handle:
 with urllib.request.urlopen(URL + "/api/capabilities", timeout=10) as response:
     capabilities = json.load(response)
 window = capabilities["audio"]["window_seconds"]
+streaming_chunk_seconds = capabilities["audio"]["streaming_chunk_seconds"]
 
 sio.connect(URL)
 sio.emit(
@@ -111,6 +112,7 @@ sio.disconnect()
 spoken = len(frames) / float(rate)
 print("=== %s | %s ===" % (LABEL, AUDIO_PATH))
 print("窗口 window_seconds = %.1f" % window)
+print("流式块 streaming_chunk_seconds = %.1f" % streaming_chunk_seconds)
 print("  语音时长            : %.2f s" % spoken)
 if first_partial["t"] is not None:
     print("  首个字幕延迟        : %.2f s  <- 从开始说话到屏幕上有字" % (first_partial["t"] - begin))

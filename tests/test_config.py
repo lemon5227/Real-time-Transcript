@@ -11,6 +11,13 @@ def test_config_defaults_to_localhost_and_auto_mode():
     assert config.transcription_mode == "auto"
 
 
+def test_local_port_is_allowed_when_port_is_overridden():
+    config = load_config({"PORT": "5002"})
+
+    assert "http://127.0.0.1:5002" in config.cors_origins
+    assert "http://localhost:5002" in config.cors_origins
+
+
 def test_default_audio_queue_covers_model_startup_buffer():
     config = load_config({})
     assert config.audio_max_queue == 64
