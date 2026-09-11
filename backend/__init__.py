@@ -46,6 +46,7 @@ def create_app(
         provider_factory or ProviderFactory(app_config),
         emit=lambda sid, event, payload: socketio.emit(event, payload, to=sid),
         startup_timeout_seconds=app_config.audio_startup_timeout_seconds,
+        streaming_chunk_seconds=app_config.streaming_chunk_seconds,
     )
     model_manager = ModelManager(LOCAL_MODELS)
     translation_router = translation_router or _create_translation_router(app_config)

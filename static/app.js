@@ -1051,7 +1051,12 @@
   function createTranslationQueue() {
     if (!window.EchoTranslationQueue) return;
     state.translationQueue = window.EchoTranslationQueue.create({
-      batchSize: 5,
+      // Translation only starts on confirmed captions, so it is already one
+      // confirmation lag behind the speaker. Keep the batch small and the
+      // debounce short so the Chinese line shows up while the sentence is
+      // still on screen rather than half a minute later.
+      batchSize: 2,
+      debounceMs: 150,
       maxChars: 3000,
       send: function (items) {
         if (!state.socket || !state.connected) return Promise.reject(new Error("实时连接已断开"));

@@ -13,6 +13,7 @@
     var settings = options || {};
     var batchSize = Math.max(1, Number(settings.batchSize) || 5);
     var maxChars = Math.max(1, Number(settings.maxChars) || 3000);
+    var debounceMs = Math.max(0, Number(settings.debounceMs) || 0) || 350;
     var send = typeof settings.send === "function" ? settings.send : function () { return Promise.resolve({ status: "disabled", translations: [] }); };
     var pending = [];
     var byId = new Map();
@@ -23,7 +24,7 @@
 
     function scheduleFlush() {
       if (scheduled || stopped || !pending.length) return;
-      scheduled = setTimeout(function () { scheduled = null; flush(); }, 350);
+      scheduled = setTimeout(function () { scheduled = null; flush(); }, debounceMs);
     }
 
     function enqueue(segment) {

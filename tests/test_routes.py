@@ -1,3 +1,5 @@
+import pytest
+
 from backend import create_app
 from backend.device import DeviceProfile
 
@@ -27,6 +29,15 @@ def test_capabilities_report_translation_providers_without_keys():
     assert body["translation"]["google"]["configured"] is True
     assert body["translation"]["microsoft"]["configured"] is True
     assert "secret" not in response.get_data(as_text=True)
+
+
+def test_capabilities_expose_the_streaming_latency_knobs():
+    """The UI needs these to explain and tune caption lag."""
+    app = create_app({"MLX_STREAM_RIGHT_CONTEXT": "16", "STREAMING_CHUNK_SECONDS": "0.5"})
+    audio = app.test_client().get("/api/capabilities").get_json()["audio"]
+
+    assert audio["streaming_chunk_seconds"] == 0.5
+    assert audio["streaming_lag_seconds"] == pytest.approx(16 * 0.08)
 
 
 def test_health_endpoint_is_available():

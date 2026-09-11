@@ -188,6 +188,68 @@ def test_contiguous_provider_receives_adjacent_windows_without_whisper_overlap()
     assert [chunk.size for chunk in provider.chunks] == [16000, 8000]
 
 
+def test_contiguous_provider_is_fed_in_streaming_chunks_not_window_chunks():
+    """A streaming provider only needs delivery granularity, not whisper windows.
+
+    Feeding it 3-second windows made the live draft jump once every 3 seconds,
+    which reads as "the transcript cannot keep up with the speaker".
+    """
+
+    class ContiguousProvider(FakeProvider):
+        requires_contiguous_audio = True
+
+        def __init__(self):
+            self.chunk_sizes = []
+
+        def push(self, audio):
+            self.chunk_sizes.append(audio.size)
+            return []
+
+    provider = ContiguousProvider()
+    manager = SessionManager(
+        provider_factory=lambda _config: provider,
+        streaming_chunk_seconds=0.25,
+    )
+    config = SessionConfig(
+        "local", "fake", "en", 16000, window_seconds=3.0, overlap_seconds=0.0
+    )
+    manager.start("sid-1", config)
+    manager.push_audio("sid-1", _speech(16000), sample_rate=16000, sequence=1)
+    manager.stop("sid-1")
+
+    # 1s of audio through a 0.25s window becomes four pushes, not one 3s window.
+    assert provider.chunk_sizes == [4000, 4000, 4000, 4000]
+
+
+def test_windowed_provider_keeps_the_configured_window_size():
+    class WindowedProvider(FakeProvider):
+        requires_contiguous_audio = False
+
+        def __init__(self):
+            self.chunk_sizes = []
+
+        def push(self, audio):
+            self.chunk_sizes.append(audio.size)
+            return []
+
+    provider = WindowedProvider()
+    manager = SessionManager(
+        provider_factory=lambda _config: provider,
+        streaming_chunk_seconds=0.25,
+    )
+    config = SessionConfig(
+        "cloud", "fake", "en", 16000, window_seconds=3.0, overlap_seconds=0.0
+    )
+    manager.start("sid-1", config)
+    manager.push_audio("sid-1", _speech(48000), sample_rate=16000, sequence=1)
+    manager.stop("sid-1")
+
+    # The streaming chunk size must not leak into the windowed (cloud/Whisper)
+    # path: those providers really do infer once per window. Three seconds of
+    # audio through a 0.25s streaming chunk would otherwise be 12 pushes.
+    assert provider.chunk_sizes == [48000]
+
+
 def test_provider_starts_and_pushes_on_the_same_worker_thread():
     class ThreadAffineProvider(FakeProvider):
         def start(self, config):

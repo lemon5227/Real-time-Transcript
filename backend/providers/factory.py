@@ -131,7 +131,10 @@ class ProviderFactory:
                     "Mac MLX 转录依赖或模型不可用",
                     "请安装 requirements-mac.txt，或切换到云端模式",
                 )
-            return MlxParakeetProvider(PARAKEET_MODEL_REF)
+            return MlxParakeetProvider(
+                PARAKEET_MODEL_REF,
+                right_context=self.config.mlx_stream_right_context,
+            )
 
         if model_id == PARAKEET_MODEL_ID:
             raise ProviderError(

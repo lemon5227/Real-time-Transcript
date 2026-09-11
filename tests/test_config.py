@@ -1,3 +1,5 @@
+import pytest
+
 from backend.config import load_config
 
 
@@ -22,6 +24,28 @@ def test_startup_timeout_is_configurable_and_reaches_the_browser():
 
     configured = load_config({"AUDIO_STARTUP_TIMEOUT_SECONDS": "20"})
     assert configured.audio_startup_timeout_seconds == 20.0
+
+
+def test_streaming_chunk_and_right_context_are_configurable():
+    """Both knobs trade latency against accuracy/CPU, so neither is hardcoded."""
+    config = load_config({})
+    assert config.streaming_chunk_seconds == 1.0
+    assert config.mlx_stream_right_context == 32
+
+    configured = load_config(
+        {"STREAMING_CHUNK_SECONDS": "0.5", "MLX_STREAM_RIGHT_CONTEXT": "8"}
+    )
+    assert configured.streaming_chunk_seconds == 0.5
+    assert configured.mlx_stream_right_context == 8
+
+
+def test_public_config_reports_the_streaming_confirmation_lag():
+    """One encoder frame is 8 * 160 / 16000 = 0.08s of held-back audio."""
+    config = load_config({})
+    audio = config.public_dict()["audio"]
+    assert audio["streaming_chunk_seconds"] == 1.0
+    assert audio["streaming_lag_seconds"] == pytest.approx(32 * 0.08)
+    assert config.streaming_confirmation_lag_seconds == pytest.approx(2.56)
 
 
 def test_public_config_never_contains_api_key():

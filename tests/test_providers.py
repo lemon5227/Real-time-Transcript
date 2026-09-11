@@ -302,6 +302,87 @@ def test_auto_provider_falls_back_when_local_model_cannot_start():
     assert cloud.started is True
 
 
+def test_mlx_provider_sends_the_configured_right_context_to_the_stream():
+    """The right context is the whole confirmation delay: right * 0.08s."""
+    from backend.providers.mlx_parakeet import (
+        PARAKEET_LEFT_CONTEXT,
+        MlxParakeetProvider,
+    )
+
+    captured = {}
+
+    class Stream:
+        finalized_tokens = []
+        draft_tokens = []
+        result = type("Result", (), {"text": "", "sentences": []})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    class Model:
+        def transcribe_stream(self, **kwargs):
+            captured.update(kwargs)
+            return Stream()
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3",
+        loader=lambda **_: Model(),
+        right_context=8,
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+    assert captured["context_size"] == (PARAKEET_LEFT_CONTEXT, 8)
+    assert provider.confirmation_lag_seconds() == pytest.approx(0.64)
+
+
+def test_mlx_provider_defaults_to_a_usable_right_context():
+    from backend.providers.mlx_parakeet import (
+        PARAKEET_RIGHT_CONTEXT_DEFAULT,
+        MlxParakeetProvider,
+    )
+
+    provider = MlxParakeetProvider("mlx-community/parakeet-tdt-0.6b-v3")
+
+    assert PARAKEET_RIGHT_CONTEXT_DEFAULT == 32
+    assert provider.confirmation_lag_seconds() == pytest.approx(2.56)
+
+
+@pytest.mark.parametrize(
+    "given,expected",
+    [(0, 1), (-5, 1), (9999, 256), ("not-an-int", 32), (None, 32)],
+)
+def test_mlx_provider_clamps_right_context(given, expected):
+    """A bad env var must degrade to something usable, not crash the session."""
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    provider = MlxParakeetProvider("mlx-community/parakeet-tdt-0.6b-v3", right_context=given)
+
+    assert provider._right_context == expected
+
+
+def test_factory_passes_the_configured_right_context_to_the_mlx_provider():
+    """The env var only helps if it survives the whole construction chain."""
+    from backend.device import DeviceProfile
+    from backend.providers.mlx_parakeet import PARAKEET_MODEL_ID
+
+    config = load_config({"MLX_STREAM_RIGHT_CONTEXT": "8"})
+    factory = ProviderFactory(
+        config,
+        local_available=lambda _model: True,
+        device_profile=DeviceProfile("mps", "apple", None, "balanced"),
+    )
+
+    provider = factory.create(SessionConfig("local", PARAKEET_MODEL_ID, "en", 16000))
+
+    assert provider._right_context == 8
+
+
 def test_mlx_provider_maps_stream_sentences_to_segments():
     from backend.providers.mlx_parakeet import MlxParakeetProvider
 
@@ -517,10 +598,13 @@ def test_mlx_provider_breaks_unpunctuated_final_text_into_readable_chunks():
     provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
     result = provider.push(np.zeros(16000, dtype=np.float32))
 
+    limit = MlxParakeetProvider.max_words_per_segment
     assert result[0].is_final is True
-    assert result[0].text == " ".join("word%d" % index for index in range(1, 25))
+    assert result[0].text == " ".join("word%d" % index for index in range(1, limit + 1))
     assert result[1].is_final is False
-    assert result[1].text == "word25"
+    assert result[1].text == " ".join(
+        "word%d" % index for index in range(limit + 1, 26)
+    )
 
 
 def test_mlx_provider_does_not_split_on_internal_domain_periods():

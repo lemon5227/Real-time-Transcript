@@ -56,13 +56,17 @@ class SessionManager:
         emit: Optional[EmitCallback] = None,
         max_payload_bytes: int = 2_000_000,
         startup_timeout_seconds: float = 45.0,
+        streaming_chunk_seconds: float = 1.0,
     ):
         if startup_timeout_seconds <= 0:
             raise ValueError("startup_timeout_seconds must be positive")
+        if streaming_chunk_seconds <= 0:
+            raise ValueError("streaming_chunk_seconds must be positive")
         self._provider_factory = provider_factory
         self._emit = emit or (lambda _sid, _event, _payload: None)
         self._max_payload_bytes = max_payload_bytes
         self._startup_timeout_seconds = startup_timeout_seconds
+        self._streaming_chunk_seconds = streaming_chunk_seconds
         self._sessions: Dict[str, _SessionState] = {}
         # Sessions that were asked to stop but whose worker is still winding
         # down, usually because the model was still loading. Kept so a fast
@@ -257,13 +261,22 @@ class SessionManager:
                 # session now would revive a session the client already ended.
                 state.startup_event.set()
                 return
+            contiguous = bool(
+                getattr(state.provider, "requires_contiguous_audio", False)
+            )
             state.audio_buffer = AudioWindowBuffer(
-                window_seconds=state.config.window_seconds,
-                overlap_seconds=(
-                    0.0
-                    if getattr(state.provider, "requires_contiguous_audio", False)
-                    else state.config.overlap_seconds
+                # A streaming provider keeps its own internal timeline, so the
+                # window is only a delivery granularity for it. Feeding it in
+                # small chunks keeps the live draft scrolling instead of
+                # jumping once every window_seconds. Windowed providers (cloud,
+                # Whisper) really do infer once per window, so they keep the
+                # configured window size.
+                window_seconds=(
+                    self._streaming_chunk_seconds
+                    if contiguous
+                    else state.config.window_seconds
                 ),
+                overlap_seconds=0.0 if contiguous else state.config.overlap_seconds,
             )
             state.voice_gate = VoiceGate(
                 enabled=state.config.enable_vad,

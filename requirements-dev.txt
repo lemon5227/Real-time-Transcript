@@ -2,3 +2,7 @@
 pytest>=8,<9
 pytest-cov>=5,<7
 ruff>=0.6,<1
+# The latency probes in tools/ speak socket.io over WebSocket. Without this the
+# client silently falls back to HTTP long-polling and every measurement is
+# pessimistic compared to what the browser actually sees.
+websocket-client>=1.7,<2

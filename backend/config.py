@@ -68,6 +68,18 @@ class AppConfig:
     audio_vad_threshold: float
     audio_glossary: Tuple[str, ...]
     audio_startup_timeout_seconds: float
+    streaming_chunk_seconds: float
+    mlx_stream_right_context: int
+
+    @property
+    def streaming_confirmation_lag_seconds(self) -> float:
+        """How long the streaming model holds audio back before confirming text.
+
+        One encoder frame is 8 (subsampling) * 160 (hop) / 16000 = 0.08s, and the
+        decoder refuses to finalize the last `right context` frames. Keep this in
+        sync with `ENCODER_FRAME_SECONDS` in providers/mlx_parakeet.py.
+        """
+        return round(self.mlx_stream_right_context * 0.08, 3)
 
     @property
     def cloud_configured(self) -> bool:
@@ -120,6 +132,8 @@ class AppConfig:
                 "vad_threshold": self.audio_vad_threshold,
                 "glossary": list(self.audio_glossary),
                 "startup_timeout_seconds": self.audio_startup_timeout_seconds,
+                "streaming_chunk_seconds": self.streaming_chunk_seconds,
+                "streaming_lag_seconds": self.streaming_confirmation_lag_seconds,
             },
             "translation": {
                 "google": {
@@ -245,5 +259,11 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         audio_glossary=parse_glossary(source.get("AUDIO_GLOSSARY", "")),
         audio_startup_timeout_seconds=_parse_float(
             source.get("AUDIO_STARTUP_TIMEOUT_SECONDS", "45"), "AUDIO_STARTUP_TIMEOUT_SECONDS", 1.0
+        ),
+        streaming_chunk_seconds=_parse_float(
+            source.get("STREAMING_CHUNK_SECONDS", "1.0"), "STREAMING_CHUNK_SECONDS", 0.1
+        ),
+        mlx_stream_right_context=_parse_int(
+            source.get("MLX_STREAM_RIGHT_CONTEXT", "32"), "MLX_STREAM_RIGHT_CONTEXT", 1
         ),
     )

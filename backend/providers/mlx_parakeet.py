@@ -40,6 +40,17 @@ PARAKEET_LANGUAGES = {
 PARAKEET_MODEL_ID = "parakeet-tdt-0.6b-v3"
 PARAKEET_MODEL_REF = "mlx-community/parakeet-tdt-0.6b-v3"
 
+# The streaming decoder keeps `left` encoder frames of history and refuses to
+# finalize the last `right` frames, because those still lack right context.
+# One encoder frame is 8 (subsampling) * 160 (hop) / 16000 = 0.08s, so the
+# confirmation lag is exactly `right * 0.08` seconds: the shipped default of
+# 64 cost 5.12s before any caption could be confirmed.
+PARAKEET_LEFT_CONTEXT = 256
+PARAKEET_RIGHT_CONTEXT_DEFAULT = 32
+PARAKEET_RIGHT_CONTEXT_MIN = 1
+PARAKEET_RIGHT_CONTEXT_MAX = 256
+ENCODER_FRAME_SECONDS = 0.08
+
 
 def mlx_runtime_available() -> bool:
     try:
@@ -51,16 +62,21 @@ def mlx_runtime_available() -> bool:
 class MlxParakeetProvider:
     name = "mlx"
     requires_contiguous_audio = True
-    max_words_per_segment = 24
+    # A confirmed caption is what both the transcript and the translation queue
+    # wait for, so the cap decides how long a run-on sentence can delay its own
+    # translation. 24 words could hold a line for 10+ seconds of speech.
+    max_words_per_segment = 16
     max_words_in_current_draft = 32
 
     def __init__(
         self,
         model_ref: str,
         loader: Optional[Callable[..., object]] = None,
+        right_context: int = PARAKEET_RIGHT_CONTEXT_DEFAULT,
     ):
         self.model = model_ref
         self._loader = loader
+        self._right_context = self._clamp_right_context(right_context)
         self._model = None
         self._stream = None
         self._audio_converter = None
@@ -72,6 +88,18 @@ class MlxParakeetProvider:
         self._pending_final_tokens: List[object] = []
         self._timeline_cursor_ms = 0
         self._last_draft = ""
+
+    @classmethod
+    def _clamp_right_context(cls, value: object) -> int:
+        try:
+            number = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return PARAKEET_RIGHT_CONTEXT_DEFAULT
+        return max(PARAKEET_RIGHT_CONTEXT_MIN, min(PARAKEET_RIGHT_CONTEXT_MAX, number))
+
+    def confirmation_lag_seconds(self) -> float:
+        """How long the decoder holds audio back before it can confirm text."""
+        return round(self._right_context * ENCODER_FRAME_SECONDS, 3)
 
     def start(self, config: SessionConfig) -> None:
         self._config = config
@@ -102,8 +130,10 @@ class MlxParakeetProvider:
             stream = self._model.transcribe_stream(
                 # Keep a generous left context for lecture terminology while
                 # reducing the right context so confirmed text arrives in a
-                # useful time for live classes.
-                context_size=(256, 64),
+                # useful time for live classes. Every right-context frame costs
+                # ENCODER_FRAME_SECONDS of confirmation lag (64 frames used to
+                # hold captions back by 5.12s).
+                context_size=(PARAKEET_LEFT_CONTEXT, self._right_context),
                 keep_original_attention=False,
             )
             self._stream = stream.__enter__()
