@@ -9,6 +9,7 @@ from .local_whisper import LocalWhisperProvider, local_model_available
 from .mlx_parakeet import (
     PARAKEET_MODEL_ID,
     PARAKEET_MODEL_REF,
+    MlxModelCache,
     MlxParakeetProvider,
     mlx_runtime_available,
 )
@@ -82,10 +83,17 @@ class ProviderFactory:
         config: AppConfig,
         local_available: Optional[Callable[[str], bool]] = None,
         device_profile: Optional[DeviceProfile] = None,
+        mlx_model_cache: Optional[MlxModelCache] = None,
     ):
         self.config = config
         self._local_available = local_available or local_model_available
         self._device_profile = device_profile or get_device_profile()
+        self._mlx_model_cache = mlx_model_cache or MlxModelCache()
+
+    @property
+    def mlx_model_cache(self) -> MlxModelCache:
+        """Shared exclusive cache used by live and post-class MLX inference."""
+        return self._mlx_model_cache
 
     def create(self, session_config: SessionConfig) -> TranscriptionProvider:
         local_model = session_config.model or self.config.local_model
@@ -134,6 +142,7 @@ class ProviderFactory:
             return MlxParakeetProvider(
                 PARAKEET_MODEL_REF,
                 right_context=self.config.mlx_stream_right_context,
+                model_cache=self._mlx_model_cache,
             )
 
         if model_id == PARAKEET_MODEL_ID:

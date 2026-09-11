@@ -19,6 +19,8 @@ from typing import Optional, Sequence
 
 VALID_MODES = {"auto", "local", "cloud"}
 CLOUD_SETTINGS = ("CLOUD_BASE_URL", "CLOUD_API_KEY", "CLOUD_TRANSCRIPTION_MODEL")
+DEFAULT_MINIMUM_PYTHON = (3, 9)
+MAC_MLX_MINIMUM_PYTHON = (3, 10)
 
 
 @dataclass(frozen=True)
@@ -51,15 +53,39 @@ def select_profile(
     return BootstrapProfile("cloud", "requirements-cloud.txt", "cloud")
 
 
-def ensure_env_file(root: Path) -> bool:
+def resolve_runtime_root(source_root: Path) -> Path:
+    """Resolve the writable runtime directory for this app instance."""
+
+    configured = os.environ.get("TRANSCRIPT_RUNTIME_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
+    env_file = os.environ.get("TRANSCRIPT_ENV_FILE", "").strip()
+    if env_file:
+        return Path(env_file).expanduser().parent
+
+    return source_root
+
+
+def resolve_env_file(source_root: Path, runtime_root: Optional[Path] = None) -> Path:
+    """Resolve the settings file without requiring the source tree to be writable."""
+
+    configured = os.environ.get("TRANSCRIPT_ENV_FILE", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return (runtime_root or resolve_runtime_root(source_root)) / ".env"
+
+
+def ensure_env_file(root: Path, runtime_root: Optional[Path] = None) -> bool:
     """Create `.env` from the example only when the user has none."""
 
-    env_path = root / ".env"
+    env_path = resolve_env_file(root, runtime_root)
     if env_path.exists():
         return False
     example_path = root / ".env.example"
     if not example_path.exists():
         raise FileNotFoundError("Missing .env.example")
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(example_path, env_path)
     return True
 
@@ -70,14 +96,97 @@ def _venv_python(venv_path: Path) -> Path:
     return venv_path / "bin" / "python"
 
 
-def ensure_venv(root: Path) -> Path:
+def minimum_python_version(requirements_file: str) -> tuple[int, int]:
+    if requirements_file == "requirements-mac.txt":
+        return MAC_MLX_MINIMUM_PYTHON
+    return DEFAULT_MINIMUM_PYTHON
+
+
+def validate_python_version(version: tuple[int, int], requirements_file: str) -> None:
+    minimum = minimum_python_version(requirements_file)
+    if version >= minimum:
+        return
+    raise RuntimeError(
+        "%s requires Python %d.%d+. Detected Python %d.%d. "
+        "Install Python 3.12 with `brew install python@3.12`, then rerun ./quickstart.sh."
+        % (requirements_file, minimum[0], minimum[1], version[0], version[1])
+    )
+
+
+def python_candidates() -> list[Path]:
+    """Return the current interpreter followed by common installed Python versions."""
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    names = ["python3.13", "python3.12", "python3.11", "python3.10", "python3"]
+    discovered = [shutil.which(name) for name in names]
+    for candidate in [Path(sys.executable)] + [Path(found) for found in discovered if found]:
+        resolved = candidate.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            candidates.append(resolved)
+    return candidates
+
+
+def read_python_version(python: Path) -> tuple[int, int]:
+    if python.resolve() == Path(sys.executable).resolve():
+        return sys.version_info[:2]
+    result = subprocess.run(
+        [str(python), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    major, minor = result.stdout.strip().split(".", 1)
+    return int(major), int(minor)
+
+
+def find_bootstrap_python(requirements_file: str) -> Path:
+    """Find an installed interpreter compatible with the selected runtime."""
+
+    detected: list[str] = []
+    for candidate in python_candidates():
+        try:
+            version = read_python_version(candidate)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        detected.append("%s (%d.%d)" % (candidate, version[0], version[1]))
+        if version >= minimum_python_version(requirements_file):
+            return candidate
+    minimum = minimum_python_version(requirements_file)
+    details = ", ".join(detected) or "没有找到可用的 Python 解释器"
+    raise RuntimeError(
+        "%s requires Python %d.%d+. Detected: %s. "
+        "Install Python 3.12 with `brew install python@3.12`, then rerun ./quickstart.sh."
+        % (requirements_file, minimum[0], minimum[1], details)
+    )
+
+
+def ensure_venv(
+    root: Path,
+    bootstrap_python: Optional[Path] = None,
+    requirements_file: Optional[str] = None,
+    runtime_root: Optional[Path] = None,
+) -> Path:
     """Create or reuse the project virtual environment."""
 
-    venv_path = root / ".venv"
+    bootstrap_python = bootstrap_python or Path(sys.executable)
+    venv_path = runtime_root or resolve_runtime_root(root)
+    venv_path = venv_path / ".venv"
     python_path = _venv_python(venv_path)
+    if python_path.exists() and requirements_file:
+        try:
+            validate_python_version(read_python_version(python_path), requirements_file)
+        except RuntimeError:
+            print("Existing .venv uses an incompatible Python; rebuilding it with the selected interpreter.")
+            subprocess.run(
+                [str(bootstrap_python), "-m", "venv", "--clear", str(venv_path)],
+                cwd=root,
+                check=True,
+            )
     if not python_path.exists():
         subprocess.run(
-            [sys.executable, "-m", "venv", str(venv_path)],
+            [str(bootstrap_python), "-m", "venv", str(venv_path)],
             cwd=root,
             check=True,
         )
@@ -147,22 +256,34 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     root = Path(__file__).resolve().parent
+    runtime_root = resolve_runtime_root(root)
+    env_path = resolve_env_file(root, runtime_root)
     profile = select_profile(args.mode, platform.system(), platform.machine(), _nvidia_available())
 
-    created_env = ensure_env_file(root)
+    created_env = ensure_env_file(root, runtime_root=runtime_root)
     if created_env:
         print("Created .env from .env.example; add cloud settings only if cloud mode is needed.")
 
-    python_path = ensure_venv(root)
+    bootstrap_python = find_bootstrap_python(profile.requirements_file)
+    python_path = ensure_venv(
+        root,
+        bootstrap_python,
+        profile.requirements_file,
+        runtime_root=runtime_root,
+    )
+    version = read_python_version(python_path)
+    print("Using Python %d.%d from %s" % (version[0], version[1], python_path))
     print(f"Installing runtime dependencies for {profile.runtime_label}...")
     install_requirements(python_path, root / profile.requirements_file)
 
     environment = os.environ.copy()
+    environment["TRANSCRIPT_RUNTIME_DIR"] = str(runtime_root)
+    environment["TRANSCRIPT_ENV_FILE"] = str(env_path)
     if profile.mode != "auto":
         environment["TRANSCRIPTION_MODE"] = profile.mode
 
     if profile.mode == "cloud":
-        missing = missing_cloud_settings(root / ".env")
+        missing = missing_cloud_settings(env_path)
         if missing:
             print("Cloud transcription is not configured yet. Missing variable names: " + ", ".join(missing))
 
@@ -176,5 +297,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return completed.returncode
 
 
+def run_cli(argv: Optional[Sequence[str]] = None) -> int:
+    try:
+        return main(argv)
+    except RuntimeError as exc:
+        print("Setup could not continue: %s" % exc, file=sys.stderr)
+        return 2
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli())

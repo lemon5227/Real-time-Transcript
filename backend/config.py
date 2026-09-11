@@ -163,7 +163,11 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         try:
             from dotenv import load_dotenv
 
-            load_dotenv()
+            env_file = os.environ.get("TRANSCRIPT_ENV_FILE", "").strip()
+            if env_file:
+                load_dotenv(dotenv_path=env_file)
+            else:
+                load_dotenv()
         except ImportError:
             pass
         source: Mapping[str, str] = os.environ
@@ -184,6 +188,12 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         ).split(",")
         if origin.strip()
     )
+    if host in {"127.0.0.1", "localhost", "0.0.0.0", "::", "::1"}:
+        local_origins = (
+            "http://127.0.0.1:%d" % port,
+            "http://localhost:%d" % port,
+        )
+        origins += tuple(origin for origin in local_origins if origin not in origins)
     # Managed hosts publish the public URL only once the container is running,
     # so it cannot be written into the image. Without it a deployed instance
     # would reject its own browser origin.

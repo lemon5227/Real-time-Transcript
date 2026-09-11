@@ -10,10 +10,12 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 from .config import AppConfig, load_config
+from .fine_transcription import FineTranscriptionManager
 from .model_manager import ModelManager
 from .providers.factory import ProviderFactory
 from .providers.google_translation import GoogleTranslationProvider
 from .providers.microsoft_translation import MicrosoftTranslationProvider
+from .providers.mlx_parakeet import MlxModelCache
 from .routes import LOCAL_MODELS, register_routes, register_socket_handlers
 from .session_manager import SessionManager
 from .translation import ModelTranslationProvider, TranslationRouter
@@ -42,18 +44,22 @@ def create_app(
     )
     CORS(app, origins=list(app_config.cors_origins) or "*")
 
+    resolved_provider_factory = provider_factory or ProviderFactory(app_config)
     manager = SessionManager(
-        provider_factory or ProviderFactory(app_config),
+        resolved_provider_factory,
         emit=lambda sid, event, payload: socketio.emit(event, payload, to=sid),
         startup_timeout_seconds=app_config.audio_startup_timeout_seconds,
         streaming_chunk_seconds=app_config.streaming_chunk_seconds,
     )
+    model_cache = getattr(resolved_provider_factory, "mlx_model_cache", None) or MlxModelCache()
+    fine_transcription_manager = FineTranscriptionManager(model_cache=model_cache)
     model_manager = ModelManager(LOCAL_MODELS)
     translation_router = translation_router or _create_translation_router(app_config)
     app.extensions["app_config"] = app_config
     app.extensions["session_manager"] = manager
     app.extensions["model_manager"] = model_manager
     app.extensions["translation_router"] = translation_router
+    app.extensions["fine_transcription_manager"] = fine_transcription_manager
     register_routes(app, app_config)
     if not getattr(socketio, "_rtt_handlers_registered", False):
         register_socket_handlers(socketio)

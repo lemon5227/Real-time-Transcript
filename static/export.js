@@ -47,8 +47,8 @@
 
   function formatMarkdown(session, options) {
     var record = session || {};
-    var segments = record.segments || [];
     var settings = options || {};
+    var segments = settings.segments || record.segments || [];
     var lines = ["# " + (record.title || "未命名课堂"), "", "- 日期：" + (record.createdAt || record.created_at || "未记录"), "- 语言：" + (record.language || "未指定"), "- Provider：" + (record.provider || "未记录"), "", "## 字幕", ""];
     segments.forEach(function (segment) {
       var marker = segment.starred ? " ★" : "";
@@ -61,8 +61,9 @@
   function formatPlainText(session, options) {
     var record = session || {};
     var settings = options || {};
+    var segments = settings.segments || record.segments || [];
     var lines = [(record.title || "未命名课堂"), "=".repeat(Math.max(8, (record.title || "未命名课堂").length)), ""];
-    (record.segments || []).forEach(function (segment) {
+    segments.forEach(function (segment) {
       var note = segment.note ? "\n  笔记：" + segment.note : "";
       var marker = segment.starred ? " ★" : "";
       lines.push("[" + segmentTimestamp(segment, "startMs", ".") + "]" + marker + " " + segmentText(segment, settings) + note);

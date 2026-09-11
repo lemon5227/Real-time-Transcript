@@ -91,3 +91,23 @@ if (!newRecord.segments[0].translations.zh || newRecord.segments[0].translations
 '''
     result = run_node(script)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_session_normalization_preserves_refined_transcript():
+    script = r'''
+const fs = require('fs');
+const vm = require('vm');
+const context = {window: {}};
+vm.runInNewContext(fs.readFileSync('./static/storage.js', 'utf8'), context);
+const record = context.window.EchoStore.normalizeSession({
+  id: 'refined',
+  segments: [{id: 'live-1', text: 'draft'}],
+  refinedSegments: [{id: 'refined-0', text: 'polished', startMs: 1000, endMs: 2400}],
+  refinement: {status: 'ready', provider: 'mlx', model: 'parakeet', completedAt: '2026-09-11T10:00:00Z'}
+});
+if (record.refinedSegments[0].text !== 'polished') process.exit(1);
+if (record.refinement.status !== 'ready' || record.refinement.provider !== 'mlx') process.exit(2);
+if (record.refinement.error !== '') process.exit(3);
+'''
+    result = run_node(script)
+    assert result.returncode == 0, result.stderr or result.stdout

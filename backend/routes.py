@@ -1,12 +1,16 @@
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from flask import Flask, current_app, jsonify, redirect, render_template, request
 from flask_socketio import SocketIO
+from werkzeug.utils import secure_filename
 
 from .config import AppConfig
 from .device import device_public_dict, get_device_profile
+from .fine_transcription import MAX_AUDIO_BYTES
 from .models import SessionConfig
 from .providers.base import ProviderError
+from .providers.mlx_parakeet import PARAKEET_MODEL_ID, PARAKEET_MODEL_REF
 from .translation import translate_with_fallback
 
 LOCAL_MODELS = (
@@ -187,6 +191,64 @@ def register_routes(app: Flask, config: AppConfig) -> None:
         except (ProviderError, ValueError, TypeError) as exc:
             result = _translation_error_result(exc)
             return jsonify(result), 400 if result["error"]["code"].startswith("TRANSLATION_INVALID") else 502
+
+    @app.post("/api/refine-transcription")
+    def start_refine_transcription():
+        uploaded = request.files.get("audio")
+        if uploaded is None:
+            return jsonify({
+                "status": "error",
+                "error": {
+                    "code": "FINE_TRANSCRIPTION_INVALID_AUDIO",
+                    "message": "没有收到课堂原声",
+                    "action": "先在实时听课中保存原声，再回到课后复习",
+                },
+            }), 400
+        audio_bytes = uploaded.stream.read(MAX_AUDIO_BYTES + 1)
+        if not audio_bytes:
+            return jsonify({
+                "status": "error",
+                "error": {
+                    "code": "FINE_TRANSCRIPTION_INVALID_AUDIO",
+                    "message": "课堂原声为空",
+                    "action": "确认录音已正常保存后重试",
+                },
+            }), 400
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            return jsonify({
+                "status": "error",
+                "error": {
+                    "code": "FINE_TRANSCRIPTION_AUDIO_TOO_LARGE",
+                    "message": "课堂原声超过 512MB",
+                    "action": "先分段保存课堂录音后重试",
+                },
+            }), 413
+        filename = secure_filename(uploaded.filename or "lecture.webm")
+        suffix = Path(filename).suffix.lower() or ".webm"
+        requested_model = str(request.form.get("model") or "").strip()
+        model_ref = requested_model if requested_model in {PARAKEET_MODEL_ID, PARAKEET_MODEL_REF} else PARAKEET_MODEL_REF
+        language = str(request.form.get("language") or "en").strip()[:16] or "en"
+        manager = current_app.extensions["fine_transcription_manager"]
+        try:
+            job = manager.start(audio_bytes, suffix, language, model_ref)
+        except ValueError as exc:
+            return jsonify({
+                "status": "error",
+                "error": {
+                    "code": "FINE_TRANSCRIPTION_INVALID_AUDIO",
+                    "message": str(exc),
+                    "action": "确认录音已正常保存后重试",
+                },
+            }), 400
+        return jsonify(job), 202
+
+    @app.get("/api/refine-transcription/<job_id>")
+    def get_refine_transcription(job_id: str):
+        manager = current_app.extensions["fine_transcription_manager"]
+        job = manager.get(job_id)
+        if job is None:
+            return jsonify({"status": "error", "error": {"code": "FINE_TRANSCRIPTION_JOB_NOT_FOUND", "message": "精细转录任务不存在"}}), 404
+        return jsonify(job)
 
 
 def register_socket_handlers(socketio: SocketIO) -> None:

@@ -11,6 +11,27 @@ def test_config_defaults_to_localhost_and_auto_mode():
     assert config.transcription_mode == "auto"
 
 
+def test_config_loads_dotenv_from_explicit_external_env_file(tmp_path, monkeypatch):
+    env_file = tmp_path / "Application Support" / "Real-time Transcript" / ".env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("HOST=127.0.0.1\nPORT=54321\n", encoding="utf-8")
+    monkeypatch.setenv("TRANSCRIPT_ENV_FILE", str(env_file))
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+
+    config = load_config()
+
+    assert config.port == 54321
+    assert "http://127.0.0.1:54321" in config.cors_origins
+
+
+def test_local_port_is_allowed_when_port_is_overridden():
+    config = load_config({"PORT": "5002"})
+
+    assert "http://127.0.0.1:5002" in config.cors_origins
+    assert "http://localhost:5002" in config.cors_origins
+
+
 def test_default_audio_queue_covers_model_startup_buffer():
     config = load_config({})
     assert config.audio_max_queue == 64

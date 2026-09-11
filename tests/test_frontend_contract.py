@@ -116,6 +116,16 @@ def test_review_page_exposes_after_class_translation_and_export_modes():
         assert hook in export
 
 
+def test_review_page_exposes_fine_transcription_controls():
+    app = create_app({})
+    html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    for hook in ["refine-transcription", "refine-transcription-status", "transcript-mode-realtime", "transcript-mode-refined"]:
+        assert hook in html
+    for hook in ["refinedSegments", "/api/refine-transcription", "transcriptionMode"]:
+        assert hook in javascript
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript
@@ -273,6 +283,20 @@ def test_live_workbench_follow_does_not_pause_on_programmatic_scroll():
         assert hook in javascript
     assert "toggle.checked = false" in javascript
     assert "if (!atBottom && toggle.checked)" not in javascript
+
+
+def test_live_workbench_follow_ignores_programmatic_user_intent_events():
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+
+    assert "if (state.followScrollLock || (event && event.isTrusted === false) || !toggle.checked) return;" in javascript
+    assert "pauseFollowForUserIntent(event)" in javascript
+
+
+def test_latency_probe_reports_streaming_chunk_separately_from_window():
+    probe = (ROOT / "tools/measure_caption_latency.py").read_text(encoding="utf-8")
+
+    assert 'streaming_chunk_seconds = capabilities["audio"]["streaming_chunk_seconds"]' in probe
+    assert "streaming_chunk_seconds" in probe
 
 
 def test_live_workbench_renders_one_updating_live_row_in_history_feed():

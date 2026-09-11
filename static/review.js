@@ -3,7 +3,7 @@
 
   var $ = function (selector) { return document.querySelector(selector); };
   var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioManifest: null, audioLoadToken: 0, translationBusy: false, translationRun: 0 };
+  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioBlob: null, audioManifest: null, audioSessionId: null, audioLoadToken: 0, transcriptionMode: "realtime", refinementBusy: false, refinementRun: 0, refinementPoll: null, translationBusy: false, translationRun: 0 };
   var list = $("#sessionList");
   var detailEmpty = $("#detailEmpty");
   var detailContent = $("#detailContent");
@@ -28,7 +28,18 @@
     try { return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); } catch (error) { return "时间未知"; }
   }
 
-  function segmentsOf(session) { return (session && session.segments) || []; }
+  function realtimeSegmentsOf(session) { return (session && session.segments) || []; }
+
+  function refinedSegmentsOf(session) { return (session && (session.refinedSegments || session.refined_segments)) || []; }
+
+  function refinementOf(session) { return (session && session.refinement) || {}; }
+
+  function hasRefinedTranscript(session) { return refinedSegmentsOf(session).length > 0 && refinementOf(session).status === "ready"; }
+
+  function segmentsOf(session) {
+    if (session === state.selected && state.transcriptionMode === "refined" && hasRefinedTranscript(session)) return refinedSegmentsOf(session);
+    return realtimeSegmentsOf(session);
+  }
 
   function translationOf(segment, target) {
     var record = segment && segment.translations && segment.translations[target || $("#review-translation-target").value];
@@ -56,6 +67,48 @@
     $("#review-translation-model").disabled = settings.mode === "fast" || state.translationBusy;
     ["#translate-session", "#translate-selected", "#translate-failed"].forEach(function (selector) { $(selector).disabled = state.translationBusy || !state.selected; });
     $("#review-translation-progress").textContent = state.translationBusy ? "正在按批次翻译，已完成的段落会立即保存…" : "译文会保存在本机课堂笔记中；原声不会发送给翻译服务。";
+  }
+
+  function updateRefinementControls() {
+    var session = state.selected;
+    var refinement = refinementOf(session);
+    var ready = hasRefinedTranscript(session);
+    var button = $("#refine-transcription");
+    var refinedButton = $("#transcript-mode-refined");
+    var realtimeButton = $("#transcript-mode-realtime");
+    if (!button || !refinedButton || !realtimeButton) return;
+    button.disabled = state.refinementBusy || !session || !state.audioBlob;
+    refinedButton.disabled = state.refinementBusy || !ready;
+    realtimeButton.classList.toggle("is-selected", state.transcriptionMode !== "refined" || !ready);
+    refinedButton.classList.toggle("is-selected", state.transcriptionMode === "refined" && ready);
+    var status = $("#refine-transcription-status");
+    var progress = $("#refine-transcription-progress");
+    if (!session) {
+      status.textContent = "选择课堂后开始";
+      progress.textContent = "课后精细转录会使用保存的原声，不会覆盖实时稿。";
+      return;
+    }
+    if (state.refinementBusy || refinement.status === "queued" || refinement.status === "processing") {
+      status.textContent = "精细转录中";
+      progress.textContent = "正在用完整上下文校正字幕；你仍可以切回实时稿。" + (refinement.progress ? " 已完成 " + refinement.progress + "%" : "");
+    } else if (ready) {
+      status.textContent = state.transcriptionMode === "refined" ? "正在查看精细稿" : "精细稿已就绪";
+      progress.textContent = "精细稿已保留；实时稿仍在本机保存，可随时切换对照。";
+      button.textContent = "重新精细转录";
+    } else if (refinement.status === "failed") {
+      status.textContent = "精细转录失败";
+      status.classList.add("is-warning");
+      progress.textContent = "没有覆盖实时稿。" + ((refinement.error && refinement.error.message) || "确认 MLX 模型可用后重试。");
+      button.textContent = "重试精细转录";
+    } else if (!state.audioBlob) {
+      status.textContent = "需要保存原声";
+      progress.textContent = "这节课没有可用原声；请在实时听课中开启原声保存后再试。";
+    } else {
+      status.textContent = "使用实时稿";
+      progress.textContent = "使用已保存原声做一次完整上下文校正；不会覆盖实时稿。";
+      button.textContent = "开始精细转录";
+    }
+    status.classList.toggle("is-warning", refinement.status === "failed" || !state.audioBlob);
   }
 
   function findReviewSegment(id) {
@@ -171,10 +224,13 @@
   function releaseAudioUrl() {
     if (state.audioUrl) window.URL.revokeObjectURL(state.audioUrl);
     state.audioUrl = null;
+    state.audioBlob = null;
     state.audioManifest = null;
+    state.audioSessionId = null;
     reviewAudio.removeAttribute("src");
     reviewAudio.load();
     $("#export-audio").disabled = true;
+    updateRefinementControls();
   }
 
   function setAudioStatus(status, meta) {
@@ -183,11 +239,14 @@
   }
 
   function loadAudio(session) {
+    if (session && state.audioSessionId === session.id) return Promise.resolve(state.audioBlob);
     var token = state.audioLoadToken + 1;
     state.audioLoadToken = token;
     releaseAudioUrl();
+    state.audioSessionId = session && session.id;
     if (!session || !window.EchoAudioRepository) {
       setAudioStatus("没有保存原声", "这节课堂只有字幕记录");
+      updateRefinementControls();
       return Promise.resolve(null);
     }
     setAudioStatus("正在读取原声", "正在从本机存储恢复音频…");
@@ -201,18 +260,103 @@
         if (token !== state.audioLoadToken) return null;
         if (!blob) {
           setAudioStatus("原声暂不可用", "本机没有找到可播放的音频片段");
+          updateRefinementControls();
           return null;
         }
+        state.audioBlob = blob;
         state.audioUrl = window.URL.createObjectURL(blob);
         reviewAudio.src = state.audioUrl;
         reviewAudio.load();
         $("#export-audio").disabled = false;
         setAudioStatus(manifest.status === "ready" ? "原声已保存" : "原声部分保存", formatBytes(manifest.bytes) + " · " + formatDuration(manifest.durationMs));
+        updateRefinementControls();
         return blob;
       });
     }).catch(function () {
-      if (token === state.audioLoadToken) setAudioStatus("原声读取失败", "字幕仍然可以继续复习");
+      if (token === state.audioLoadToken) { setAudioStatus("原声读取失败", "字幕仍然可以继续复习"); updateRefinementControls(); }
       return null;
+    });
+  }
+
+  function refinementErrorMessage(body, fallback) {
+    return body && body.error && body.error.message ? body.error.message : (fallback || "精细转录失败");
+  }
+
+  function setRefinementFailed(message) {
+    if (!state.selected) return;
+    state.refinementBusy = false;
+    state.selected.refinement = Object.assign({}, refinementOf(state.selected), {
+      status: "failed",
+      error: { message: message || "精细转录失败" },
+      completedAt: new Date().toISOString()
+    });
+    updateRefinementControls();
+    saveSelected().then(function () { renderDetail(); showNotice("error", "精细转录未完成", message || "确认 MLX 模型可用后重试"); });
+  }
+
+  function pollRefinement(jobId, run) {
+    if (run !== state.refinementRun || !state.selected) return;
+    fetch("/api/refine-transcription/" + encodeURIComponent(jobId)).then(function (response) {
+      return response.json().then(function (body) { if (!response.ok || body.status === "error") throw new Error(refinementErrorMessage(body, "精细转录任务读取失败")); return body; });
+    }).then(function (job) {
+      if (run !== state.refinementRun || !state.selected) return;
+      state.selected.refinement = Object.assign({}, refinementOf(state.selected), {
+        status: job.status,
+        provider: "mlx",
+        model: job.model || refinementOf(state.selected).model,
+        progress: Number(job.progress) || 0,
+        startedAt: job.startedAt || refinementOf(state.selected).startedAt,
+        error: job.error || null
+      });
+      if (job.status === "ready") {
+        state.selected.refinedSegments = (job.segments || []).map(function (segment, index) {
+          return { id: segment.id || "refined-" + index, text: String(segment.text || "").trim(), startMs: Number(segment.startMs) || 0, endMs: Number(segment.endMs) || 0, isFinal: true, note: "", starred: false, translations: {} };
+        });
+        state.selected.refinement.completedAt = job.completedAt || new Date().toISOString();
+        state.refinementBusy = false;
+        state.transcriptionMode = "refined";
+        renderDetail();
+        saveSelected().then(function () { showNotice("success", "精细转录完成", "实时稿仍然保留，可切换对照"); });
+        return;
+      }
+      if (job.status === "failed") {
+        setRefinementFailed(refinementErrorMessage(job, "确认 MLX 模型可用后重试"));
+        return;
+      }
+      updateRefinementControls();
+      state.refinementPoll = window.setTimeout(function () { pollRefinement(jobId, run); }, 700);
+    }).catch(function (error) {
+      if (run === state.refinementRun) setRefinementFailed(error.message || "精细转录任务读取失败");
+    });
+  }
+
+  function startFineTranscription() {
+    if (state.refinementBusy || !state.selected) return;
+    if (!state.audioBlob) return showNotice("info", "这节课堂没有可用原声", "请先保存原声后再做精细转录");
+    var run = state.refinementRun + 1;
+    state.refinementRun = run;
+    state.refinementBusy = true;
+    state.selected.refinement = {
+      status: "queued",
+      provider: "mlx",
+      model: state.selected.model || "mlx-community/parakeet-tdt-0.6b-v3",
+      progress: 0,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      error: null
+    };
+    updateRefinementControls();
+    var form = new FormData();
+    form.append("audio", state.audioBlob, (state.audioManifest && state.audioManifest.extension ? "lecture." + state.audioManifest.extension : "lecture.webm"));
+    form.append("language", state.selected.language || "en");
+    form.append("model", "mlx-community/parakeet-tdt-0.6b-v3");
+    fetch("/api/refine-transcription", { method: "POST", body: form }).then(function (response) {
+      return response.json().then(function (body) { if (!response.ok || body.status === "error") throw new Error(refinementErrorMessage(body, "精细转录无法开始")); return body; });
+    }).then(function (job) {
+      if (run !== state.refinementRun) return;
+      pollRefinement(job.job_id, run);
+    }).catch(function (error) {
+      if (run === state.refinementRun) setRefinementFailed(error.message || "精细转录无法开始");
     });
   }
 
@@ -290,13 +434,18 @@
 
   function selectSession(id) {
     var session = state.sessions.find(function (candidate) { return candidate.id === id; });
+    state.refinementRun += 1;
+    state.refinementBusy = false;
+    if (state.refinementPoll) window.clearTimeout(state.refinementPoll);
+    state.refinementPoll = null;
     state.selected = session || null;
+    state.transcriptionMode = hasRefinedTranscript(session) ? "refined" : "realtime";
     renderLibrary();
     renderDetail();
   }
 
   function renderDetail() {
-    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; updateTranslationControls(); return; }
+    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; updateTranslationControls(); updateRefinementControls(); return; }
     detailEmpty.hidden = true;
     detailContent.hidden = false;
     $("#review-title").value = state.selected.title || "未命名课堂";
@@ -304,9 +453,10 @@
     $("#review-segment-count").textContent = segmentsOf(state.selected).length;
     $("#review-duration").textContent = formatDuration(state.selected.durationMs);
     loadAudio(state.selected);
+    $("#review-transcript-source").textContent = state.transcriptionMode === "refined" && hasRefinedTranscript(state.selected) ? "精细稿 · 完整上下文" : "实时稿 · 上课同步记录";
     var stream = $("#reviewStream"); stream.textContent = "";
     segmentsOf(state.selected).forEach(function (segment, index) {
-      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : ""); card.dataset.segmentIndex = String(index);
+      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : ""); card.dataset.segmentIndex = String(index); card.dataset.segmentId = String(segment.id || "");
       var header = document.createElement("div"); header.className = "review-segment-header";
       var time = document.createElement("time"); time.textContent = window.EchoExport.timestamp(segment.startMs, "."); time.tabIndex = 0; time.setAttribute("role", "button"); time.setAttribute("aria-label", "跳转到第 " + (index + 1) + " 段字幕"); time.addEventListener("click", function () { seekToSegment(segment); }); time.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); seekToSegment(segment); } });
       var selectLabel = document.createElement("label"); selectLabel.className = "segment-select-label"; var selectInput = document.createElement("input"); selectInput.type = "checkbox"; selectInput.className = "segment-select"; selectInput.value = String(segment.id || ""); selectInput.setAttribute("aria-label", "选择第 " + (index + 1) + " 段字幕"); var selectText = document.createElement("span"); selectText.textContent = "选择"; selectLabel.append(selectInput, selectText);
@@ -322,12 +472,23 @@
       card.append(noteRow); stream.appendChild(card);
     });
     updateTranslationControls();
+    updateRefinementControls();
+  }
+
+  function chooseTranscriptMode(mode) {
+    if (!state.selected) return;
+    if (mode === "refined" && !hasRefinedTranscript(state.selected)) {
+      return showNotice("info", "精细稿还没有准备好", "先点击开始精细转录");
+    }
+    state.transcriptionMode = mode === "refined" ? "refined" : "realtime";
+    renderDetail();
   }
 
   function download(format) {
     if (!state.selected) return showNotice("info", "请先选择一节课堂");
     var formatters = { txt: window.EchoExport.formatPlainText, md: window.EchoExport.formatMarkdown, vtt: window.EchoExport.formatVtt, srt: window.EchoExport.formatSrt };
-    var content = formatters[format](state.selected, { translationMode: $("#export-translation-mode").value, targetLanguage: $("#review-translation-target").value });
+    var options = { translationMode: $("#export-translation-mode").value, targetLanguage: $("#review-translation-target").value, segments: segmentsOf(state.selected) };
+    var content = format === "vtt" || format === "srt" ? formatters[format](segmentsOf(state.selected), options) : formatters[format](state.selected, options);
     var mime = format === "md" ? "text/markdown;charset=utf-8" : format === "vtt" || format === "srt" ? "text/plain;charset=utf-8" : "text/plain;charset=utf-8";
     var link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: mime })); link.download = (state.selected.title || "lecture").replace(/[\\/:*?"<>|]+/g, "-") + "." + format; link.click(); window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
     showNotice("success", "已准备导出文件", format.toUpperCase());
@@ -343,6 +504,9 @@
   $("#delete-session").addEventListener("click", function () { if (!state.selected || !window.confirm("确定删除这节课堂记录吗？此操作无法撤销。")) return; var id = state.selected.id; var removeAudio = window.EchoAudioRepository && window.EchoAudioRepository.deleteRecording ? window.EchoAudioRepository.deleteRecording(id) : Promise.resolve(); removeAudio.then(function () { return window.EchoStore.deleteSession(id); }).then(function () { state.sessions = state.sessions.filter(function (session) { return session.id !== id; }); state.selected = null; releaseAudioUrl(); renderLibrary(); renderDetail(); showNotice("success", "课堂记录已删除"); }).catch(function () { showNotice("error", "删除失败", "课堂记录和原声都未删除"); }); });
   $$(".export-button").forEach(function (button) { button.addEventListener("click", function () { download(button.dataset.format); }); });
   $("#export-audio").addEventListener("click", downloadAudio);
+  $("#refine-transcription").addEventListener("click", startFineTranscription);
+  $("#transcript-mode-realtime").addEventListener("click", function () { chooseTranscriptMode("realtime"); });
+  $("#transcript-mode-refined").addEventListener("click", function () { chooseTranscriptMode("refined"); });
   $("#translate-session").addEventListener("click", function () { translateSegments(segmentsOf(state.selected)); });
   $("#translate-selected").addEventListener("click", function () { var segments = selectedReviewSegments(); if (!segments.length) return showNotice("info", "请先勾选要翻译的段落"); translateSegments(segments); });
   $("#translate-failed").addEventListener("click", function () { var segments = failedReviewSegments(); if (!segments.length) return showNotice("info", "当前没有失败的译文"); translateSegments(segments, { force: true }); });
