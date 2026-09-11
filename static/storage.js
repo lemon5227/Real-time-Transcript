@@ -85,6 +85,21 @@
     };
   }
 
+  function normalizeRefinement(refinement) {
+    var record = refinement || {};
+    var statuses = ["not_started", "queued", "processing", "ready", "failed"];
+    var status = statuses.indexOf(String(record.status || "not_started")) !== -1 ? String(record.status || "not_started") : "not_started";
+    return {
+      status: status,
+      provider: String(record.provider || ""),
+      model: String(record.model || ""),
+      progress: Math.max(0, Math.min(100, Number(record.progress) || 0)),
+      startedAt: record.startedAt || record.started_at || null,
+      completedAt: record.completedAt || record.completed_at || null,
+      error: String(record.error || "")
+    };
+  }
+
   function normalizeSession(session) {
     var record = session || {};
     return {
@@ -96,6 +111,8 @@
       provider: String(record.provider || "unknown"),
       model: String(record.model || ""),
       segments: (record.segments || []).map(normalizeSegment),
+      refinedSegments: (record.refinedSegments || record.refined_segments || []).map(normalizeSegment),
+      refinement: normalizeRefinement(record.refinement),
       audio: normalizeAudio(record.audio)
     };
   }
