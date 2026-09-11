@@ -4,7 +4,6 @@ import pytest
 
 from quickstart import BootstrapProfile, missing_cloud_settings, select_profile
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
