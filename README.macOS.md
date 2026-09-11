@@ -13,3 +13,18 @@ cp .env.example .env
 ```
 
 Allow microphone access for the browser at `http://127.0.0.1:5001`. See [privacy](docs/PRIVACY.md) before enabling cloud mode.
+
+## macOS DMG from GitHub Actions
+
+The `macOS DMG` workflow builds `拾句-macOS.dmg` on `workflow_dispatch` and uploads
+it as the `shiju-macos-dmg` artifact. Pushing a version tag matching `v*` also
+attaches the same DMG to a GitHub Release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+For a test build, open **Actions → macOS DMG → Run workflow** and optionally enter
+a version. The current package is unsigned; on first launch use **Control-click →
+Open**. The workflow does not download model weights.

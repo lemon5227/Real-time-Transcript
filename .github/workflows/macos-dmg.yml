@@ -1,0 +1,73 @@
+name: macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号；留空时使用运行编号"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      OUTPUT_DIR: ${{ runner.temp }}/shiju-dist
+      REQUESTED_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Install SVG renderer
+        run: brew install librsvg
+
+      - name: Check packaging toolchain
+        run: |
+          command -v iconutil
+          command -v hdiutil
+          command -v rsvg-convert
+          command -v rsync
+          bash -n packaging/macos/launcher.sh scripts/build-macos-dmg.sh
+
+      - name: Resolve package version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            printf 'VERSION=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          elif [[ -n "$REQUESTED_VERSION" ]]; then
+            printf 'VERSION=%s\n' "$REQUESTED_VERSION" >> "$GITHUB_ENV"
+          else
+            printf 'VERSION=0.1.0-%s\n' "$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build DMG
+        run: |
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          bash scripts/build-macos-dmg.sh
+          hdiutil imageinfo "$OUTPUT_DIR/拾句-macOS.dmg"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiju-macos-dmg
+          path: ${{ runner.temp }}/shiju-dist/拾句-macOS.dmg
+          if-no-files-found: error
+
+      - name: Publish tagged Release asset
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$OUTPUT_DIR/拾句-macOS.dmg" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$OUTPUT_DIR/拾句-macOS.dmg" \
+              --verify-tag \
+              --generate-notes \
+              --title "拾句 $VERSION"
+          fi

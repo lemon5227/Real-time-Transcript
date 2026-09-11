@@ -58,3 +58,21 @@ def test_ci_runs_lint_tests_and_browser_javascript():
     assert "ruff check ." in content
     assert "pytest -q" in content
     assert "node --check" in content
+
+
+def test_macos_dmg_workflow_builds_and_publishes_artifact():
+    workflow = (ROOT / ".github" / "workflows" / "macos-dmg.yml").read_text(encoding="utf-8")
+    for token in [
+        "workflow_dispatch",
+        'tags: ["v*"]',
+        "runs-on: macos-14",
+        "brew install librsvg",
+        "bash scripts/build-macos-dmg.sh",
+        "hdiutil imageinfo",
+        "actions/upload-artifact@v4",
+        "shiju-macos-dmg",
+        "拾句-macOS.dmg",
+        "contents: write",
+        "gh release create",
+    ]:
+        assert token in workflow

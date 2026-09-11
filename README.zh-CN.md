@@ -45,6 +45,18 @@ Mac 的 MLX 请使用原生启动，Docker 不能直接使用宿主机 Metal。�
 
 端口占用时可以使用 `TRANSCRIPT_PORT=5002 docker compose up --build`，然后打开 `http://localhost:5002/`。完整平台说明见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
+### macOS DMG 自动构建
+
+GitHub Actions 中的 `macOS DMG` 工作流会在 `workflow_dispatch` 手动运行时生成可下载的
+`拾句-macOS.dmg` 构建产物；推送匹配 `v*` 的版本标签还会自动把同一个 DMG 附加到 GitHub Release：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+也可以在仓库的 **Actions → macOS DMG → Run workflow** 中输入版本号后运行。当前产物未签名，首次打开请使用 **Control-click → Open**；工作流不会下载模型权重。
+
 ## 字幕延迟调优（Apple Silicon / MLX）
 
 Parakeet 流式解码会先"压住"一段音频才敢确认字幕。它把最后 `右上下文` 个 encoder 帧当作

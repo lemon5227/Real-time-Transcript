@@ -79,6 +79,24 @@ To reset a packaged installation, quit the browser/server and remove the
 checkout startup remains unchanged and continues to use `.venv` and `.env` in
 the repository.
 
+### GitHub Actions release build
+
+The repository includes a `macOS DMG` workflow for repeatable distribution. It
+runs on `workflow_dispatch` and uploads `拾句-macOS.dmg` as the
+`shiju-macos-dmg` artifact. A pushed tag matching `v*` also creates or updates a
+GitHub Release and attaches the DMG:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+For a non-release build, use **Actions → macOS DMG → Run workflow** and enter an
+optional version. The first version is intentionally unsigned and does not
+need a signing secret; on first launch use **Control-click → Open**. The build
+does not install Python, download model weights, or include `.env`, `.venv`,
+recordings, logs, or caches.
+
 ### Windows PowerShell
 
 ```powershell

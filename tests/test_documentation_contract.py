@@ -62,3 +62,10 @@ def test_macos_dmg_docs_explain_first_run_and_external_runtime():
             "model weights",
         ]:
             assert phrase in content, f"{phrase} missing from {relative_path}"
+
+
+def test_docs_explain_github_macos_dmg_release_flow():
+    for path in [ROOT / "README.zh-CN.md", ROOT / "README.macOS.md", ROOT / "docs" / "DEPLOYMENT.md"]:
+        content = path.read_text(encoding="utf-8")
+        for token in ["macOS DMG", "workflow_dispatch", "v*", "拾句-macOS.dmg", "Control-click"]:
+            assert token in content, f"{token} missing from {path}"
