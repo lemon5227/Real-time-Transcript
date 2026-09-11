@@ -1,7 +1,27 @@
+import io
+
 import pytest
 
 from backend import create_app
 from backend.device import DeviceProfile
+
+
+class ImmediateFineManager:
+    def __init__(self):
+        self.jobs = {}
+
+    def start(self, audio_bytes, suffix, language, model_ref):
+        self.jobs["job-1"] = {
+            "job_id": "job-1",
+            "status": "ready",
+            "segments": [],
+            "language": language,
+            "model": model_ref,
+        }
+        return {"job_id": "job-1", "status": "ready"}
+
+    def get(self, job_id):
+        return self.jobs.get(job_id)
 
 
 def test_capabilities_redact_cloud_api_key():
@@ -97,3 +117,28 @@ def test_model_download_endpoint_rejects_unknown_model():
     app = create_app({})
     response = app.test_client().post("/api/models/not-a-model/download")
     assert response.status_code == 404
+
+
+def test_refine_transcription_requires_audio():
+    app = create_app({})
+
+    response = app.test_client().post("/api/refine-transcription")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "FINE_TRANSCRIPTION_INVALID_AUDIO"
+
+
+def test_refine_transcription_returns_pollable_job():
+    app = create_app({})
+    app.extensions["fine_transcription_manager"] = ImmediateFineManager()
+    client = app.test_client()
+
+    response = client.post(
+        "/api/refine-transcription",
+        data={"audio": (io.BytesIO(b"wav"), "lecture.webm"), "language": "en"},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    job_id = response.get_json()["job_id"]
+    assert client.get(f"/api/refine-transcription/{job_id}").get_json()["status"] == "ready"

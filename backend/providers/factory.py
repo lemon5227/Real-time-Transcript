@@ -90,6 +90,11 @@ class ProviderFactory:
         self._device_profile = device_profile or get_device_profile()
         self._mlx_model_cache = mlx_model_cache or MlxModelCache()
 
+    @property
+    def mlx_model_cache(self) -> MlxModelCache:
+        """Shared exclusive cache used by live and post-class MLX inference."""
+        return self._mlx_model_cache
+
     def create(self, session_config: SessionConfig) -> TranscriptionProvider:
         local_model = session_config.model or self.config.local_model
         if (
