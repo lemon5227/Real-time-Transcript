@@ -137,6 +137,15 @@ def test_review_page_exposes_fine_transcription_controls():
         assert hook in javascript
 
 
+def test_review_page_exposes_audio_synced_history_feedback():
+    app = create_app({})
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
+    for hook in ["is-playing", "scrollIntoView", "getBoundingClientRect", "block: \"nearest\""]:
+        assert hook in javascript
+    assert ".review-segment.is-playing" in stylesheet
+
+
 def test_frontend_has_actionable_startup_and_recovery_copy():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "正在准备麦克风" in javascript

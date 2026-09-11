@@ -3,7 +3,7 @@
 
   var $ = function (selector) { return document.querySelector(selector); };
   var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioBlob: null, audioManifest: null, audioSessionId: null, audioLoadToken: 0, transcriptionMode: "realtime", refinementBusy: false, refinementRun: 0, refinementPoll: null, translationBusy: false, translationRun: 0 };
+  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioBlob: null, audioManifest: null, audioSessionId: null, audioLoadToken: 0, transcriptionMode: "realtime", playingSegmentId: null, refinementBusy: false, refinementRun: 0, refinementPoll: null, translationBusy: false, translationRun: 0 };
   var list = $("#sessionList");
   var detailEmpty = $("#detailEmpty");
   var detailContent = $("#detailContent");
@@ -369,11 +369,32 @@
   function syncPlayingSegment() {
     var currentMs = (Number(reviewAudio.currentTime) || 0) * 1000;
     var segments = segmentsOf(state.selected);
-    $$(".review-segment").forEach(function (card, index) {
-      var segment = segments[index];
+    var activeIndex = -1;
+    segments.some(function (segment, index) {
       var next = segments[index + 1];
       var endMs = Number(segment && segment.endMs) || (next ? Number(next.startMs) || currentMs : Number.POSITIVE_INFINITY);
-      card.classList.toggle("is-playing", Boolean(segment && Number(segment.startMs) <= currentMs && currentMs < endMs));
+      if (segment && Number(segment.startMs) <= currentMs && currentMs < endMs) {
+        activeIndex = index;
+        return true;
+      }
+      return false;
+    });
+    var activeSegment = activeIndex >= 0 ? segments[activeIndex] : null;
+    var activeId = activeSegment ? String(activeSegment.id || "") : null;
+    var changed = activeId !== state.playingSegmentId;
+    state.playingSegmentId = activeId;
+    var stream = $("#reviewStream");
+    $$(".review-segment").forEach(function (card, index) {
+      var isPlaying = index === activeIndex;
+      card.classList.toggle("is-playing", isPlaying);
+      if (!isPlaying || !changed || !stream) return;
+      var cardRect = card.getBoundingClientRect();
+      var streamRect = stream.getBoundingClientRect();
+      var outsideViewport = cardRect.bottom < streamRect.top || cardRect.top > streamRect.bottom;
+      if (outsideViewport && typeof card.scrollIntoView === "function") {
+        var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        card.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
+      }
     });
   }
 
@@ -439,6 +460,7 @@
     if (state.refinementPoll) window.clearTimeout(state.refinementPoll);
     state.refinementPoll = null;
     state.selected = session || null;
+    state.playingSegmentId = null;
     state.transcriptionMode = hasRefinedTranscript(session) ? "refined" : "realtime";
     renderLibrary();
     renderDetail();
