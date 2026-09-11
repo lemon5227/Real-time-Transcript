@@ -78,3 +78,7 @@ transformers_cache/
 .coverage
 coverage.xml
 htmlcov/
+
+# Local assistant working notes (daily logs, skill cache). Machine-local, so it
+# must never reach the repository or a shared clone.
+.workbuddy/
