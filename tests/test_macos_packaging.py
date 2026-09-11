@@ -29,6 +29,14 @@ def test_canonical_app_icon_is_a_flat_live_page_svg():
     assert "http://" not in source.replace("http://www.w3.org/2000/svg", "")
 
 
+def test_canonical_app_icon_keeps_the_canvas_transparent_and_the_page_legible():
+    source = _svg_text(ICON_PATH)
+
+    assert '<rect width="1024" height="1024"' not in source
+    assert 'stroke="#0B1020"' in source
+    assert 'fill="#F5F3EE"' in source
+
+
 def test_favicon_is_a_compact_standalone_version_of_the_live_page_mark():
     source = _svg_text(FAVICON_PATH)
     root = ElementTree.fromstring(source)
