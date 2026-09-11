@@ -99,6 +99,17 @@ def test_live_page_exposes_translation_controls_and_queue():
     assert "batchSize" in queue
 
 
+def test_translation_defaults_to_microsoft_for_new_users():
+    app = create_app({})
+    live_html = app.test_client().get("/").get_data(as_text=True)
+    review_html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+
+    assert '<option value="microsoft" selected>Microsoft Translator</option>' in live_html
+    assert '<option value="microsoft" selected>Microsoft Translator</option>' in review_html
+    assert 'translationProvider: "microsoft"' in javascript
+
+
 def test_review_page_exposes_audio_playback_hooks():
     app = create_app({})
     html = app.test_client().get("/review").get_data(as_text=True)
@@ -107,6 +118,20 @@ def test_review_page_exposes_audio_playback_hooks():
         assert hook in html
     for hook in ["getPlayableBlob", "currentTime", "timeupdate", "revokeObjectURL"]:
         assert hook in javascript
+
+
+def test_review_page_exposes_readable_segment_action_states():
+    app = create_app({})
+    html = app.test_client().get("/review").get_data(as_text=True)
+    javascript = app.test_client().get("/static/review.js").get_data(as_text=True)
+    stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
+
+    for hook in ["segment-action", "segment-select", "translate-segment", "star-toggle"]:
+        assert hook in javascript or hook in html
+    for hook in [".review-tools-row", ".review-selection-toolbar", ".segment-action", ".is-selected", ".is-translated"]:
+        assert hook in stylesheet
+    for phrase in ["已选择", "已翻译", "已标记"]:
+        assert phrase in javascript
 
 
 def test_translation_queue_is_loaded_by_live_page():
