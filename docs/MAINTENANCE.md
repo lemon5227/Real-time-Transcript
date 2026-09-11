@@ -26,6 +26,32 @@ curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.t
 `audio.streaming_chunk_seconds`, `audio.streaming_lag_seconds`, which cloud provider is
 configured, and the startup timeout.
 
+## Post-class fine transcription
+
+The review page has two independent transcript sources. `session.segments` is the real-time
+draft captured during class; `session.refinedSegments` is created only when the user starts
+the explicit **课后精细转录** pass. The latter uses the browser-local recording, calls Parakeet
+MLX in batch mode with full-context 10-minute chunks and 15 seconds of overlap, and never
+replaces the live draft. The review page can switch between both sources; notes, translations,
+audio seeking, and exports follow the currently selected source.
+
+The API is intentionally a short-lived local job interface:
+
+```text
+POST /api/refine-transcription       multipart audio upload → 202 {job_id}
+GET  /api/refine-transcription/:id   queued/processing/ready/failed snapshot
+```
+
+The server keeps the upload in a temporary file only for the active job and removes it in a
+`finally` block. The in-memory job registry is process-local, so a server restart loses an
+unfinished job but does not lose the browser's saved audio or transcript. This pass currently
+requires the Apple Silicon MLX runtime and the downloaded Parakeet model; Windows/CUDA and
+cloud transcription are deliberately not wired into this page yet.
+
+If refinement says that the model cannot start, check the model library first, then confirm
+`requirements-mac.txt` and `ffmpeg` are installed. A failed pass is persisted as metadata so
+the user sees an actionable retry instead of a generic page error.
+
 ## Symptoms → cause → action
 
 ### Captions lag the speaker by several seconds

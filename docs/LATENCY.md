@@ -126,6 +126,21 @@ inference call consumes almost the whole delivery interval. When the queue is em
 has headroom, it returns to the configured base. A normal MacBook therefore keeps the 1-second
 live cadence, while a busy machine can catch up without dropping as much audio.
 
+## Why review has a separate fine pass
+
+The streaming path is optimized for readable captions while someone is speaking. It has to emit
+drafts before a sentence has ended, so it can split or revise a long sentence and cannot use the
+whole lecture as context. The review page therefore keeps that real-time result and offers a
+separate batch pass against the saved original audio. Parakeet processes up to 10 minutes at a
+time with 15 seconds of overlap, which improves sentence boundaries and terminology consistency
+without making live caption delivery wait. The refined result is stored separately and can be
+compared, edited, translated, or exported without destroying the in-class record.
+
+The refinement job shares the process-local MLX model cache with live transcription. The cache
+lease is exclusive: if a live session is still using Parakeet, the post-class job waits for the
+lease rather than loading a second copy or racing the streaming decoder. This keeps memory use
+reasonable on a 16GB MacBook Air, at the cost of serializing concurrent MLX work.
+
 `ProviderFactory` keeps the loaded Parakeet weights in a process-local cache. Each lecture still
 gets a fresh streaming decoder, but sequential sessions skip the model reload. The cache leases a
 model exclusively because MLX streaming temporarily changes the encoder attention implementation.

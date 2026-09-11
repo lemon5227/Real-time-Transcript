@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-
 MAX_AUDIO_BYTES = 512 * 1024 * 1024
 REFINE_CHUNK_DURATION_SECONDS = 600.0
 REFINE_OVERLAP_SECONDS = 15.0
