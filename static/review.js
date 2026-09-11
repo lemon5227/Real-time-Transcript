@@ -3,7 +3,7 @@
 
   var $ = function (selector) { return document.querySelector(selector); };
   var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioBlob: null, audioManifest: null, audioSessionId: null, audioLoadToken: 0, transcriptionMode: "realtime", playingSegmentId: null, refinementBusy: false, refinementRun: 0, refinementPoll: null, translationBusy: false, translationRun: 0 };
+  var state = { sessions: [], selected: null, filter: "all", query: "", audioUrl: null, audioBlob: null, audioManifest: null, audioSessionId: null, audioLoadToken: 0, transcriptionMode: "realtime", playingSegmentId: null, selectedSegmentIds: [], refinementBusy: false, refinementRun: 0, refinementPoll: null, translationBusy: false, translationRun: 0 };
   var list = $("#sessionList");
   var detailEmpty = $("#detailEmpty");
   var detailContent = $("#detailContent");
@@ -63,10 +63,17 @@
 
   function updateTranslationControls() {
     var settings = reviewTranslationSettings();
+    var modeLabels = { fast: "快速翻译", model: "精确翻译", auto: "自动翻译" };
+    var targetLabels = { zh: "中文", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
+    var providerSelect = $("#review-translation-provider");
+    var providerLabel = providerSelect && providerSelect.selectedOptions[0] ? providerSelect.selectedOptions[0].textContent : "Microsoft Translator";
+    var engineLabel = settings.mode === "fast" ? providerLabel : settings.mode === "auto" ? "本地优先" : "本地模型";
     $("#review-translation-provider").disabled = settings.mode !== "fast" || state.translationBusy;
     $("#review-translation-model").disabled = settings.mode === "fast" || state.translationBusy;
     ["#translate-session", "#translate-selected", "#translate-failed"].forEach(function (selector) { $(selector).disabled = state.translationBusy || !state.selected; });
+    $("#review-translation-summary").textContent = (targetLabels[settings.target] || settings.target) + " · " + (modeLabels[settings.mode] || "快速翻译") + " · " + engineLabel;
     $("#review-translation-progress").textContent = state.translationBusy ? "正在按批次翻译，已完成的段落会立即保存…" : "译文会保存在本机课堂笔记中；原声不会发送给翻译服务。";
+    renderSelectionToolbar();
   }
 
   function updateRefinementControls() {
@@ -123,7 +130,13 @@
     if (!translation || translation.status !== "ready" || !translation.text) return;
     var line = document.createElement("p");
     line.className = "review-translation-line";
-    line.textContent = translation.text;
+    var label = document.createElement("span");
+    label.className = "review-translation-label";
+    label.textContent = "译文";
+    var copy = document.createElement("span");
+    copy.className = "review-translation-copy";
+    copy.textContent = translation.text;
+    line.append(label, copy);
     var editor = card.querySelector(".segment-editor");
     if (editor && editor.nextSibling) card.insertBefore(line, editor.nextSibling);
     else card.appendChild(line);
@@ -206,8 +219,29 @@
   }
 
   function selectedReviewSegments() {
-    var ids = $$(".segment-select:checked").map(function (input) { return input.value; });
-    return segmentsOf(state.selected).filter(function (segment) { return ids.indexOf(String(segment.id || "")) !== -1; });
+    return segmentsOf(state.selected).filter(function (segment) { return state.selectedSegmentIds.indexOf(String(segment.id || "")) !== -1; });
+  }
+
+  function renderSelectionToolbar() {
+    var toolbar = $("#review-selection-toolbar");
+    var count = $("#review-selected-count");
+    var translateButton = $("#translate-selected");
+    if (!toolbar || !count || !translateButton) return;
+    var selectedCount = state.selectedSegmentIds.length;
+    toolbar.hidden = selectedCount === 0;
+    count.textContent = "已选择 " + selectedCount + " 段";
+    translateButton.textContent = selectedCount ? "翻译选中段落" : "先选择字幕";
+    translateButton.disabled = state.translationBusy || !selectedCount || !state.selected;
+  }
+
+  function updateSegmentSelection(input, label, card, segment) {
+    var id = String(segment.id || "");
+    var index = state.selectedSegmentIds.indexOf(id);
+    if (input.checked && index === -1) state.selectedSegmentIds.push(id);
+    if (!input.checked && index !== -1) state.selectedSegmentIds.splice(index, 1);
+    label.classList.toggle("is-checked", input.checked);
+    card.classList.toggle("is-selected", input.checked);
+    renderSelectionToolbar();
   }
 
   function failedReviewSegments() {
@@ -461,13 +495,14 @@
     state.refinementPoll = null;
     state.selected = session || null;
     state.playingSegmentId = null;
+    state.selectedSegmentIds = [];
     state.transcriptionMode = hasRefinedTranscript(session) ? "refined" : "realtime";
     renderLibrary();
     renderDetail();
   }
 
   function renderDetail() {
-    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; updateTranslationControls(); updateRefinementControls(); return; }
+    if (!state.selected) { detailEmpty.hidden = false; detailContent.hidden = true; state.selectedSegmentIds = []; updateTranslationControls(); updateRefinementControls(); return; }
     detailEmpty.hidden = true;
     detailContent.hidden = false;
     $("#review-title").value = state.selected.title || "未命名课堂";
@@ -478,13 +513,15 @@
     $("#review-transcript-source").textContent = state.transcriptionMode === "refined" && hasRefinedTranscript(state.selected) ? "精细稿 · 完整上下文" : "实时稿 · 上课同步记录";
     var stream = $("#reviewStream"); stream.textContent = "";
     segmentsOf(state.selected).forEach(function (segment, index) {
-      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : ""); card.dataset.segmentIndex = String(index); card.dataset.segmentId = String(segment.id || "");
+      var selected = state.selectedSegmentIds.indexOf(String(segment.id || "")) !== -1;
+      var card = document.createElement("article"); card.className = "review-segment" + (segment.starred ? " is-starred" : "") + (selected ? " is-selected" : ""); card.dataset.segmentIndex = String(index); card.dataset.segmentId = String(segment.id || "");
       var header = document.createElement("div"); header.className = "review-segment-header";
       var time = document.createElement("time"); time.textContent = window.EchoExport.timestamp(segment.startMs, "."); time.tabIndex = 0; time.setAttribute("role", "button"); time.setAttribute("aria-label", "跳转到第 " + (index + 1) + " 段字幕"); time.addEventListener("click", function () { seekToSegment(segment); }); time.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); seekToSegment(segment); } });
-      var selectLabel = document.createElement("label"); selectLabel.className = "segment-select-label"; var selectInput = document.createElement("input"); selectInput.type = "checkbox"; selectInput.className = "segment-select"; selectInput.value = String(segment.id || ""); selectInput.setAttribute("aria-label", "选择第 " + (index + 1) + " 段字幕"); var selectText = document.createElement("span"); selectText.textContent = "选择"; selectLabel.append(selectInput, selectText);
-      var starButton = document.createElement("button"); starButton.type = "button"; starButton.className = "star-toggle"; starButton.dataset.starred = String(Boolean(segment.starred)); starButton.setAttribute("aria-label", segment.starred ? "取消重点标记" : "标记为重点"); starButton.textContent = segment.starred ? "★ 重点" : "☆ 标记重点";
+      var selectLabel = document.createElement("label"); selectLabel.className = "segment-select-label" + (selected ? " is-checked" : ""); var selectInput = document.createElement("input"); selectInput.type = "checkbox"; selectInput.className = "segment-action segment-select"; selectInput.value = String(segment.id || ""); selectInput.checked = selected; selectInput.setAttribute("aria-label", "选择第 " + (index + 1) + " 段字幕"); var selectText = document.createElement("span"); selectText.textContent = "选择"; selectLabel.append(selectInput, selectText); selectInput.addEventListener("change", function () { updateSegmentSelection(selectInput, selectLabel, card, segment); });
+      var starButton = document.createElement("button"); starButton.type = "button"; starButton.className = "segment-action star-toggle"; starButton.dataset.starred = String(Boolean(segment.starred)); starButton.setAttribute("aria-label", segment.starred ? "取消重点标记" : "标记为重点"); starButton.textContent = segment.starred ? "★ 已标记" : "☆ 重点";
       starButton.addEventListener("click", function () { segment.starred = !segment.starred; renderDetail(); saveSelected(); });
-      var translateButton = document.createElement("button"); translateButton.type = "button"; translateButton.className = "translate-segment"; translateButton.textContent = "译本句"; translateButton.addEventListener("click", function () { translateSegments([segment], { force: true }); });
+      var existingTranslation = translationOf(segment, $("#review-translation-target").value);
+      var translateButton = document.createElement("button"); translateButton.type = "button"; translateButton.className = "segment-action translate-segment"; translateButton.textContent = existingTranslation && existingTranslation.status === "ready" ? "已翻译" : existingTranslation && existingTranslation.status === "failed" ? "重试" : "翻译"; translateButton.classList.toggle("is-translated", Boolean(existingTranslation && existingTranslation.status === "ready")); translateButton.setAttribute("aria-label", existingTranslation && existingTranslation.status === "ready" ? "重新翻译这句话" : "翻译这句话"); translateButton.addEventListener("click", function () { translateSegments([segment], { force: true }); });
       header.append(time, selectLabel, translateButton, starButton);
       var editor = document.createElement("textarea"); editor.className = "segment-editor"; editor.rows = 2; editor.value = segment.text || ""; editor.setAttribute("aria-label", "编辑第 " + (index + 1) + " 段字幕");
       editor.addEventListener("input", function () { segment.text = editor.value; window.clearTimeout(editor._saveTimer); editor._saveTimer = window.setTimeout(function () { saveSelected("已保存修改"); }, 500); });
@@ -493,6 +530,7 @@
       var noteRow = document.createElement("label"); noteRow.className = "note-row"; var noteLabel = document.createElement("span"); noteLabel.textContent = "NOTE"; var noteInput = document.createElement("textarea"); noteInput.id = index === 0 ? "noteInput" : "noteInput-" + index; noteInput.rows = 1; noteInput.placeholder = "补充你的理解、例子或待查概念…"; noteInput.value = segment.note || ""; noteInput.setAttribute("aria-label", "为第 " + (index + 1) + " 段字幕添加笔记"); noteInput.addEventListener("input", function () { segment.note = noteInput.value; window.clearTimeout(noteInput._saveTimer); noteInput._saveTimer = window.setTimeout(function () { saveSelected("已保存笔记"); }, 500); }); noteRow.append(noteLabel, noteInput);
       card.append(noteRow); stream.appendChild(card);
     });
+    renderSelectionToolbar();
     updateTranslationControls();
     updateRefinementControls();
   }
@@ -532,6 +570,7 @@
   $("#translate-session").addEventListener("click", function () { translateSegments(segmentsOf(state.selected)); });
   $("#translate-selected").addEventListener("click", function () { var segments = selectedReviewSegments(); if (!segments.length) return showNotice("info", "请先勾选要翻译的段落"); translateSegments(segments); });
   $("#translate-failed").addEventListener("click", function () { var segments = failedReviewSegments(); if (!segments.length) return showNotice("info", "当前没有失败的译文"); translateSegments(segments, { force: true }); });
+  $("#clear-segment-selection").addEventListener("click", function () { state.selectedSegmentIds = []; renderDetail(); });
   ["#review-translation-mode", "#review-translation-provider", "#review-translation-model", "#review-translation-target"].forEach(function (selector) { $(selector).addEventListener("change", function () { updateTranslationControls(); renderDetail(); }); });
   reviewAudio.addEventListener("timeupdate", syncPlayingSegment);
   window.addEventListener("beforeunload", releaseAudioUrl);

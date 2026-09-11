@@ -130,6 +130,7 @@ def test_review_page_exposes_readable_segment_action_states():
         assert hook in javascript or hook in html
     for hook in [".review-tools-row", ".review-selection-toolbar", ".segment-action", ".is-selected", ".is-translated"]:
         assert hook in stylesheet
+    assert ".detail-empty[hidden]" in stylesheet
     for phrase in ["已选择", "已翻译", "已标记"]:
         assert phrase in javascript
 
