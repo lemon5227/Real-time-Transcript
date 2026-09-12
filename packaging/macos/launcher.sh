@@ -4,6 +4,7 @@ set -euo pipefail
 CONTENTS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_ROOT="$CONTENTS_ROOT/Resources/app"
 PORT="${PORT:-8765}"
+export PORT
 BASE_URL="http://127.0.0.1:${PORT}"
 HEALTH_URL="$BASE_URL/api/health"
 STARTUP_TIMEOUT_SECONDS="${TRANSCRIPT_STARTUP_TIMEOUT_SECONDS:-90}"

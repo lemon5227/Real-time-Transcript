@@ -1,5 +1,10 @@
+import os
+import signal
+import subprocess
 from pathlib import Path
 from xml.etree import ElementTree
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ICON_PATH = ROOT / "static" / "app-icon.svg"
@@ -74,6 +79,82 @@ def test_macos_launcher_uses_external_user_runtime_and_bounded_health_check():
         assert token in source
     assert "/Users/" not in source
     assert ".worktrees" not in source
+
+
+@pytest.mark.parametrize(
+    ("configured_port", "expected_port"),
+    [(None, "8765"), ("54321", "54321")],
+)
+def test_macos_launcher_exports_the_port_it_waits_for_to_the_server(
+    tmp_path, configured_port, expected_port
+):
+    contents = tmp_path / "拾句.app" / "Contents"
+    launcher_dir = contents / "MacOS"
+    source_root = contents / "Resources" / "app"
+    local_bin = tmp_path / ".local" / "bin"
+    support_root = tmp_path / "support"
+    port_capture = tmp_path / "server-port"
+    launcher_dir.mkdir(parents=True)
+    source_root.mkdir(parents=True)
+    local_bin.mkdir(parents=True)
+    (source_root / "quickstart.py").write_text("# fake bootstrap entrypoint\n", encoding="utf-8")
+
+    launcher = launcher_dir / "RealTimeTranscript"
+    launcher.write_text(LAUNCHER_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    launcher.chmod(0o755)
+
+    fake_python = local_bin / "python3.13"
+    fake_python.write_text(
+        "#!/bin/bash\nprintf '%s' \"${PORT:-unset}\" > \"$PORT_CAPTURE\"\nexec /bin/sleep 20\n",
+        encoding="utf-8",
+    )
+    fake_curl = local_bin / "curl"
+    fake_curl.write_text(
+        "#!/bin/bash\n"
+        "url=\"\"\nfor argument in \"$@\"; do url=\"$argument\"; done\n"
+        "server_port=\"$(cat \"$PORT_CAPTURE\" 2>/dev/null || true)\"\n"
+        "[[ \"$server_port\" != unset && \"$url\" == \"http://127.0.0.1:${server_port}/api/health\" ]]\n",
+        encoding="utf-8",
+    )
+    for executable in [fake_python, fake_curl]:
+        executable.chmod(0o755)
+    for name in ["open", "osascript"]:
+        stub = local_bin / name
+        stub.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment.pop("PORT", None)
+    if configured_port:
+        environment["PORT"] = configured_port
+    environment.update(
+        {
+            "HOME": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+            "PORT_CAPTURE": str(port_capture),
+            "TRANSCRIPT_APP_SUPPORT_DIR": str(support_root),
+            "TRANSCRIPT_STARTUP_TIMEOUT_SECONDS": "2",
+        }
+    )
+    try:
+        result = subprocess.run(
+            ["/bin/bash", str(launcher)],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert port_capture.read_text(encoding="utf-8") == expected_port
+    finally:
+        pid_file = support_root / "pids" / "server.pid"
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
 
 
 def test_macos_bundle_metadata_declares_app_icon_and_runtime_entrypoint():

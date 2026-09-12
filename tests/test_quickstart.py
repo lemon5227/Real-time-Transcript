@@ -113,6 +113,43 @@ def test_ensure_venv_can_live_under_external_runtime_root(tmp_path: Path, monkey
     assert calls[0][0][-3:] == ["-m", "venv", str(runtime_root / ".venv")]
 
 
+def test_bootstrap_replaces_itself_with_the_server_after_installation(tmp_path, monkeypatch):
+    python_path = tmp_path / ".venv" / "bin" / "python"
+    runtime_root = tmp_path / "runtime"
+    handoff = RuntimeError("server process handoff")
+    handoff_call = {}
+    chdir_call = {}
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python_path.chmod(0o755)
+
+    monkeypatch.setenv("PORT", "8765")
+    monkeypatch.setattr(quickstart, "resolve_runtime_root", lambda _root: runtime_root)
+    monkeypatch.setattr(quickstart, "resolve_env_file", lambda _root, _runtime: runtime_root / ".env")
+    monkeypatch.setattr(quickstart, "select_profile", lambda *_args: BootstrapProfile("auto", "requirements-mac.txt", "Mac MLX"))
+    monkeypatch.setattr(quickstart, "ensure_env_file", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(quickstart, "find_bootstrap_python", lambda _requirements: Path(sys.executable))
+    monkeypatch.setattr(quickstart, "ensure_venv", lambda *_args, **_kwargs: python_path)
+    monkeypatch.setattr(quickstart, "read_python_version", lambda _python: (3, 13))
+    monkeypatch.setattr(quickstart, "install_requirements", lambda *_args: None)
+    monkeypatch.setattr(quickstart, "_nvidia_available", lambda: False)
+    monkeypatch.setattr(quickstart.os, "chdir", lambda path: chdir_call.update(path=path))
+
+    def fake_execvpe(executable, arguments, environment):
+        handoff_call.update(executable=executable, arguments=arguments, environment=environment)
+        raise handoff
+
+    monkeypatch.setattr(quickstart.os, "execvpe", fake_execvpe)
+
+    with pytest.raises(RuntimeError, match="server process handoff"):
+        quickstart.main(["--mode", "auto"])
+
+    assert handoff_call["executable"] == str(python_path)
+    assert handoff_call["arguments"] == [str(python_path), str(ROOT / "app.py")]
+    assert handoff_call["environment"]["PORT"] == "8765"
+    assert chdir_call["path"] == ROOT
+
+
 def test_windows_launcher_translates_power_shell_mode_switch():
     content = (ROOT / "quickstart.ps1").read_text(encoding="utf-8")
 

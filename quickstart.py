@@ -288,13 +288,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("Cloud transcription is not configured yet. Missing variable names: " + ", ".join(missing))
 
     print(f"Starting 拾句 ({profile.runtime_label})...")
-    completed = subprocess.run(
+    os.chdir(root)
+    os.execvpe(
+        str(python_path),
         [str(python_path), str(root / "app.py")],
-        cwd=root,
-        env=environment,
-        check=False,
+        environment,
     )
-    return completed.returncode
 
 
 def run_cli(argv: Optional[Sequence[str]] = None) -> int:
