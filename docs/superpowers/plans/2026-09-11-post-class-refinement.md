@@ -1,5 +1,7 @@
 # Post-Class Refinement Implementation Plan
 
+> 当前状态（2026-09-13）：精细转录服务、API、浏览器保存和实时稿/精细稿切换均已实现并有自动化测试；真实 MLX 录音端到端验收尚待完成。当前状态以[项目路线图](../../ROADMAP.md)为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a reliable post-class fine-transcription workflow that uses the saved local recording and Parakeet MLX batch context, while preserving the real-time transcript as an independent source.

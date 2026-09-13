@@ -1,5 +1,7 @@
 # Cross-Platform One-Click Deployment Implementation Plan
 
+> 当前状态（2026-09-13）：跨平台启动器、容器/云端部署文件及对应自动化检查已有实现；macOS MLX 与一键安装是当前实测重点。Windows/CUDA、云端设备及发布链验证状态见[项目路线图](../../ROADMAP.md)；本文件中的原始步骤清单用于追溯，不作为实时进度。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add idempotent cross-platform native launchers, reproducible Docker startup, and a Render Blueprint while keeping Mac MLX, NVIDIA CUDA, CPU, and cloud transcription paths separate.

@@ -1,6 +1,6 @@
 # Classroom Focus Workbench Design
 
-**Status:** Approved for implementation in the current thread.
+**Status:** Implemented; current live-device validation is tracked in the [project roadmap](../../ROADMAP.md).
 
 ## Goal
 

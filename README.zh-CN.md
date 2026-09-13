@@ -1,6 +1,6 @@
 # 拾句 · Real-time Transcript 中文指南
 
-这是面向留学生的实时课堂转录与课后复习工具。进入课堂前启动服务，选择本地、云端或自动路径；下课后在复习页搜索字幕、补充笔记、标记重点并导出。
+这是面向留学生的实时课堂转录与课后复习工具。进入课堂前启动服务，选择本地、云端或自动路径；下课后在复习页搜索字幕、补充笔记、标记重点并导出。项目实现、验收和暂缓事项见[项目路线图](docs/ROADMAP.md)。
 
 ## 快速启动
 
@@ -91,7 +91,7 @@ STREAMING_CHUNK_SECONDS=1.0
 
 ## 翻译 API（可选）
 
-当前翻译已经接入 Google 和 Microsoft 两个快速翻译服务。打开右侧设置中的“翻译”，选择“快速翻译”，再选择对应服务即可。
+当前翻译已经接入 Google 和 Microsoft 两个快速翻译服务。没有保存过服务偏好时默认使用 Microsoft Translator；已有用户保存的 Google 选择会保留。打开右侧设置中的“翻译”，选择“快速翻译”，即可查看和调整服务。
 
 ### Google Cloud Translation
 
@@ -133,4 +133,4 @@ TRANSLATION_MICROSOFT_REGION=
 
 原声默认按 10 秒片段保存在当前浏览器本机，云端转录只会把实时处理所需的音频窗口发送到 `.env` 中配置的服务，不建立云端录音归档。翻译是独立的文本路径：可选 Google Cloud 或 Microsoft 做快速翻译，也可使用 Ollama/LM Studio 等 OpenAI-compatible 本地服务，或使用云端模型做精确翻译；翻译不会上传原声。API Key 只在后端环境变量中保存。课堂右侧的“更多设置”可以查看模型状态，并在上课前提前下载本地模型。详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
 
-实时翻译默认关闭。快速翻译默认会尝试 Google 公共通道（免 Key，但不保证稳定）；需要更稳定的官方通道时，在 `.env` 配置 `TRANSLATION_GOOGLE_*` 或 `TRANSLATION_MICROSOFT_*`。需要本地模型精翻时配置 `TRANSLATION_LOCAL_BASE_URL` 和 `TRANSLATION_LOCAL_MODEL`，需要云端模型精翻时配置 `TRANSLATION_CLOUD_*`。没有翻译配置也不影响转录、原声保存和课后复习。
+实时翻译默认关闭。开启后，新用户默认使用 Microsoft Translator；Google Cloud 是可选服务。Google 无 Key 公共网页通道不稳定，可能遇到验证或限流，不建议依赖；需要稳定翻译时，在 `.env` 配置 `TRANSLATION_MICROSOFT_*` 或 `TRANSLATION_GOOGLE_*`。需要本地模型精翻时配置 `TRANSLATION_LOCAL_BASE_URL` 和 `TRANSLATION_LOCAL_MODEL`，需要云端模型精翻时配置 `TRANSLATION_CLOUD_*`。没有翻译配置也不影响转录、原声保存和课后复习。

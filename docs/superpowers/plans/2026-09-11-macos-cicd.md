@@ -1,5 +1,7 @@
 # macOS DMG CI/CD Implementation Plan
 
+> 当前状态（2026-09-13）：GitHub Actions 的 DMG 构建与 Release 工作流已实现并有自动化契约测试；修复版 DMG 已在本机构建、检查。当前 `main` 尚有未推送提交，最新版本的 GitHub 工作流运行及 Release 产物未验证；按[项目路线图](../../ROADMAP.md)跟踪。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make GitHub Actions build a reproducible `拾句-macOS.dmg` on Apple Silicon runners, publish it as a workflow artifact, and attach it to version-tagged GitHub Releases.

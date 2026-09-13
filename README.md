@@ -4,6 +4,8 @@
 
 > The product is designed for international students: a low-distraction live caption view during class, plus a local post-class review workspace.
 
+Current implementation, validation, and deferred work are tracked in the [project roadmap](docs/ROADMAP.md).
+
 ## What it does
 
 - Realtime microphone transcription for English lectures and other supported languages; the active local runtime is selected by device.
@@ -151,7 +153,7 @@ TRANSLATION_CLOUD_MODEL=your-translation-model
 
 The browser never receives `CLOUD_API_KEY`. The UI makes the current path visible and displays a privacy notice when cloud mode is selected. Read [`docs/PRIVACY.md`](docs/PRIVACY.md) before using a third-party endpoint.
 
-Real-time translation is off by default. When enabled, a best-effort Google public path can work without a key; Google Cloud Translation or Microsoft Translator can provide more stable quick text translation when configured. After class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Precise local translation can use an OpenAI-compatible Ollama/LM Studio endpoint; cloud precise translation uses the configured OpenAI-compatible endpoint. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
+Real-time translation is off by default. For users without a saved provider preference, quick translation defaults to Microsoft Translator; an existing Google choice is preserved. The optional keyless Google web endpoint is undocumented and unreliable, so configure official Google Cloud Translation or Microsoft credentials for dependable use. After class, the review page can translate the whole class, selected segments or one sentence with a precise local/cloud model. Precise local translation can use an OpenAI-compatible Ollama/LM Studio endpoint; cloud precise translation uses the configured OpenAI-compatible endpoint. Translation receives caption text only, never the locally saved original audio, and all translation keys stay in the backend `.env`.
 
 ### Caption latency on Apple Silicon (MLX)
 
@@ -236,7 +238,7 @@ Recommended classroom flow:
 - No review records appear: allow IndexedDB/local storage for `127.0.0.1`; live transcription itself does not depend on the review database.
 
 - Captions arrive late: lower `MLX_STREAM_RIGHT_CONTEXT` in the backend `.env`; see [`docs/LATENCY.md`](docs/LATENCY.md) for the measured trade-off.
-- Real-time translation always fails: the keyless Google endpoint is no longer usable, so configure a Microsoft or Google API key.
+- Real-time translation fails: the keyless Google endpoint may return verification or rate-limit errors; configure Microsoft Translator or Google Cloud credentials for dependable use.
 
 See [`QUICKSTART.md`](QUICKSTART.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`docs/API.md`](docs/API.md) and [`docs/PRIVACY.md`](docs/PRIVACY.md).
 

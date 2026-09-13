@@ -1,5 +1,7 @@
 # 课后复习回听同步 Implementation Plan
 
+> 当前状态：字幕与原声同步实现及自动化验证已完成；下一阶段验收顺序见[项目路线图](../../ROADMAP.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the existing课后复习页 turn saved original audio into a calm, readable learning timeline where the currently playing sentence is visible without stealing attention from the historical transcript.
@@ -73,6 +75,6 @@ Run: `for file in static/*.js; do node --check "$file"; done`.
 
 Run: `pytest -q --basetemp=/tmp/rtt-pytest-review`, `ruff check .`, `git diff --check`, and `git status --short`.
 
-- [ ] **Step 4: Document the next review milestone**
+- [x] **Step 4: Document the next review milestone**
 
 After this slice is green, the next planned feature is a lightweight “课堂重点” summary generated from starred segments and notes; it must consume the existing local session record and must not block transcript/audio review.

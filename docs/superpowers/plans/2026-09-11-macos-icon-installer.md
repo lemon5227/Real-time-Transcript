@@ -1,5 +1,7 @@
 # macOS Icon and Installer Implementation Plan
 
+> 当前状态（2026-09-13）：图标、DMG 构建、启动器、GitHub Actions 工作流及启动超时回归测试已实现；修复版 DMG 构建与校验通过。实际从 Finder 安装并完整启动仍待验证，见[项目路线图](../../ROADMAP.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship a polished macOS application icon and a one-click DMG installer for Real-time Transcript, while keeping source files, user settings, logs, virtual environments, and model caches outside the installed app bundle.
@@ -126,7 +128,7 @@ The launcher will export both variables, so the source checkout can remain read-
   - the app bundle has a valid `Info.plist`, launcher, and `.icns` file;
   - no `.env`, API key, `.venv`, model, recording, or log is present under the bundle;
   - the launcher can bootstrap into a temporary Application Support directory and reach `/api/health`.
-- [ ] If a full live launch is not possible in the current environment, state exactly which check was unavailable rather than claiming it passed.
+- [x] If a full live launch is not possible in the current environment, state exactly which check was unavailable rather than claiming it passed.
 - [x] Review `git diff --check`, inspect the final diff, and summarize the resulting artifact paths and first-run behavior.
 
 ## Suggested verification commands
