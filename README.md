@@ -111,13 +111,17 @@ brew install librsvg
 Open the DMG and drag **拾句** to Applications. On the first
 launch, macOS may show a security warning because local builds are unsigned;
 use **Control-click → Open** once. The app bootstraps Python dependencies and
-stores its writable environment, `.env`, logs, PID files, caches, and model
-weights under `~/Library/Application Support/拾句`, never in
-the app bundle. Model weights are downloaded from the in-app model manager on
-first use, so the first launch can take longer than later launches.
+stores its writable environment, `.env`, logs, and PID files under
+`~/Library/Application Support/拾句`, never in the app bundle. Hugging Face
+models such as Parakeet reuse `HF_HUB_CACHE` or `HF_HOME` when configured, and
+otherwise use `~/.cache/huggingface/hub`; this also reuses models already
+downloaded by other local tools. Whisper weights use the app's private runtime
+cache. Models are downloaded from the in-app model manager when they are not
+already cached.
 
 To reset the packaged runtime, stop the local server and remove that
-拾句 Application Support directory. Source checkout startup is unchanged:
+拾句 Application Support directory; Hugging Face model weights in the shared
+cache are not removed by this. Source checkout startup is unchanged:
 `./quickstart.sh` continues to use the repository-local `.venv` and `.env`.
 
 On an Apple Silicon Mac, the classroom page automatically selects `Parakeet TDT v3 · Mac MLX` for English and European-language lectures. For Chinese or another unsupported language, switch to Cloud mode; this Mac path does not silently fall back to CPU Whisper. On Windows, Linux and Intel Mac, choose a standard Whisper model; an NVIDIA GPU uses CUDA automatically. Open the gear-shaped Settings button to inspect model readiness and pre-download local models before class; runtime-managed models remain available as a first-use fallback.
@@ -157,36 +161,37 @@ Real-time translation is off by default. For users without a saved provider pref
 
 ### Caption latency on Apple Silicon (MLX)
 
-The Parakeet stream holds audio back before it will confirm a caption. It keeps the last
-`right context` encoder frames as "not yet certain", and one encoder frame is
-`8 (subsampling) × 160 (hop) / 16000 = 0.08s`. The confirmation lag is therefore
-`MLX_STREAM_RIGHT_CONTEXT × 0.08s` — the old hardcoded value of 64 cost 5.12s before a
-single word could appear in the transcript.
+The live decoder is a **sliding window decoded in batch** (`MLX_LIVE_MODE=windowed`, the default).
+It keeps the last `MLX_WINDOW_SECONDS` of audio and re-decodes the whole window every
+`MLX_HOP_SECONDS`, always ending at the live edge. The window is what gives the model the run-up to
+the sentence it is deciding, and because it ends at the live edge its length costs no latency:
+latency is `decode time + hop`, not window length.
 
 ```dotenv
-# Streaming model: lower = faster captions, higher = more right context to decode
-MLX_STREAM_RIGHT_CONTEXT=32
-
-# How much audio is handed to a streaming model per inference step
-STREAMING_CHUNK_SECONDS=1.0
+MLX_LIVE_MODE=windowed        # windowed (default) | streaming
+MLX_WINDOW_SECONDS=18.0       # left context; larger = more readable, slower to start
+MLX_HOP_SECONDS=2.0           # how often a caption may update
 ```
 
-Measured on an M-series Mac, ~24s of speech:
+Measured by replaying a real 127.3s lecture recording at realtime pace: a caption appears at the
+live edge (median ≈0s, worst 3.3s), and decoding runs at 0.24× realtime. The window starts short
+and grows into `MLX_WINDOW_SECONDS`, so a session's first caption arrives after ~8s rather than
+waiting for a full window. Windows shorter than about 12s return empty output over quiet
+stretches, which is why 18 is the default.
 
-| Right context | First confirmed word | Confirmation lag |
-| --- | --- | --- |
-| 64 (old default) | 6.0s | 5.12s |
-| 32 (default) | 3.0s | 2.56s |
-| 16 | 2.0s | 1.28s |
-| 8 | 2.0s | 0.64s |
+`MLX_LIVE_MODE=streaming` selects the older `transcribe_stream()` decoder. It is the only path that
+can emit draft tokens, but on lecture audio it produced word salad and ran at ~1.5× realtime, so it
+is not the default. On that path the decoder holds back the last `right context` encoder frames, one
+encoder frame being `8 (subsampling) × 160 (hop) / 16000 = 0.08s`, so the confirmation lag is
+`MLX_STREAM_RIGHT_CONTEXT × 0.08s`.
 
 `STREAMING_CHUNK_SECONDS` only applies to streaming providers. Each inference step has a
 fixed ~0.4s cost, so smaller chunks buy smoother live captions at a CPU price: 3.0s runs
 at 0.19× realtime, 1.0s at 0.42×, and 0.5s at 0.82× — too close to the limit to be the
-default. Windowed providers (cloud, Whisper) ignore it and keep `AUDIO_WINDOW_SECONDS`.
+default.
 
-Read [`docs/LATENCY.md`](docs/LATENCY.md) for the full measurements, the end-to-end
-before/after comparison, and the scripts to re-measure on your own machine.
+Read [`docs/LATENCY.md`](docs/LATENCY.md) for the full measurements, the window-versus-stream
+comparison, and the scripts to re-measure on your own machine.
 
 ### Optional Google and Microsoft translation keys
 
@@ -237,7 +242,7 @@ Recommended classroom flow:
 - Cloud requests fail: verify the base URL includes the provider API root, the key/model are valid, and the service accepts `POST /audio/transcriptions`.
 - No review records appear: allow IndexedDB/local storage for `127.0.0.1`; live transcription itself does not depend on the review database.
 
-- Captions arrive late: lower `MLX_STREAM_RIGHT_CONTEXT` in the backend `.env`; see [`docs/LATENCY.md`](docs/LATENCY.md) for the measured trade-off.
+- Captions arrive late: a session's first caption lands after ~8s, which is the head guard plus the audio the model needs to form a sentence — it is not affected by `MLX_WINDOW_SECONDS`, because the window now grows into its full length instead of waiting for it. Raising `MLX_WINDOW_SECONDS` was measured **not** to improve the text either; see [`docs/LATENCY.md`](docs/LATENCY.md). Once running, the default windowed path already lands at the live edge.
 - Real-time translation fails: the keyless Google endpoint may return verification or rate-limit errors; configure Microsoft Translator or Google Cloud credentials for dependable use.
 
 See [`QUICKSTART.md`](QUICKSTART.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`docs/API.md`](docs/API.md) and [`docs/PRIVACY.md`](docs/PRIVACY.md).

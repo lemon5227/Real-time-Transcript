@@ -23,8 +23,13 @@ curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.t
 ```
 
 `/api/capabilities` is the source of truth for effective configuration. It reports
-`audio.streaming_chunk_seconds`, `audio.streaming_lag_seconds`, which cloud provider is
-configured, and the startup timeout.
+`audio.live` (which live decoder is running, its window and hop, and how much audio it holds back),
+`audio.streaming_chunk_seconds`, `audio.streaming_lag_seconds`, which cloud provider is configured,
+and the startup timeout.
+
+Note that the `audio` block is built twice — once in `AppConfig.public_dict()` and again by hand in
+`backend/routes.py` (which adds `sample_rate`). Adding a field means editing both;
+`tests/test_routes.py` guards the live-decoder copy against drifting.
 
 ## Post-class fine transcription
 
@@ -56,22 +61,40 @@ the user sees an actionable retry instead of a generic page error.
 
 ### Captions lag the speaker by several seconds
 
-Check the confirmation lag the model is running with — `audio.streaming_lag_seconds` from
-`/api/capabilities`. It is `MLX_STREAM_RIGHT_CONTEXT × 0.08`. It used to be hardcoded to 64,
-which meant **5.12 seconds** of held-back audio and, for clips shorter than that, no confirmed
-caption at all until the session stopped.
+Two different situations, two different causes.
 
-Lower `MLX_STREAM_RIGHT_CONTEXT` in `.env` and restart. Below ~8 the model loses too much right
-context to decode with; the next lever after that is `max_words_per_segment` in
-`backend/providers/mlx_parakeet.py`. See [`LATENCY.md`](LATENCY.md) for measured trade-offs.
+**Late only at the start.** The live decoder is a sliding window decoded in batch
+(`MLX_LIVE_MODE=windowed`). The window opens short and grows into `MLX_WINDOW_SECONDS`, so the first
+caption lands after ~8s and the session then runs at the live edge. That is the head guard plus the
+audio the model needs to form a sentence, and it is not tunable from `.env`: `MLX_WINDOW_SECONDS`
+no longer affects it (the window grows into its length rather than waiting for it) and
+`MLX_HOP_SECONDS` does not either (the guard binds, not the decode cadence). Raising
+`MLX_WINDOW_SECONDS` was measured not to change the text quality either — 12s and 24s both drop
+content, 30s repeats sentences — and windows below ~10s return empty output over quiet stretches.
 
-Note what does *not* help: changing `AUDIO_WINDOW_SECONDS` moved the end-to-end confirmed
-caption from 11.38s to 11.34s. Window size is not the bottleneck.
+**Late throughout.** Read the pace the session logged:
+
+```bash
+grep "会话结束" logs/realtime-transcript.log      # 实时倍率=0.24x
+```
+
+`实时倍率` is cumulative decode time over cumulative audio time; above 1.0 the worker cannot keep
+up. The warning `解码偏慢` uses the same cumulative ratio (rate-limited to one line per 10s), so a
+session that keeps printing it is genuinely behind. Raise `MLX_HOP_SECONDS` to give each decode
+more new audio to cover.
+
+Do **not** reach for `MLX_STREAM_RIGHT_CONTEXT` here: it belongs to the streaming decoder, which is
+not the default path, and it does nothing while `MLX_LIVE_MODE=windowed`. It only appears in
+`/api/capabilities` as `audio.streaming_lag_seconds` for that other path.
+
+Note what also does *not* help: changing `AUDIO_WINDOW_SECONDS` moved the end-to-end confirmed
+caption from 11.38s to 11.34s. That window sizes the delivery chunk, not the decode.
 
 The MLX model is cached after the first session, so a second session in the same server process
-should not download or reload the weights. The streaming decoder itself is still recreated for
-every session. Do not remove the cache lease: `transcribe_stream().__enter__()` changes the shared
-encoder attention mode, so concurrent streams must not use the same model object.
+should not download or reload the weights — that is worth roughly 0.7s per session. The decoder
+state is still recreated for every session. Do not remove the cache lease: the streaming decoder's
+`transcribe_stream().__enter__()` changes the shared encoder attention mode, so concurrent users
+must not share the same model object.
 
 ### Captions freeze and then jump in a block
 
