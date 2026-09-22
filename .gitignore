@@ -82,4 +82,8 @@ htmlcov/
 # Local assistant working notes (daily logs, skill cache). Machine-local, so it
 # must never reach the repository or a shared clone.
 .workbuddy/
+.workbuddy-ai/
 .superpowers/
+
+# Runtime log directory (the files themselves are covered by *.log above)
+logs/

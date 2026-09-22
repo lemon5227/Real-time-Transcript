@@ -11,6 +11,7 @@ from flask_socketio import SocketIO
 
 from .config import AppConfig, load_config
 from .fine_transcription import FineTranscriptionManager
+from .logging_setup import configure_logging
 from .model_manager import ModelManager
 from .providers.factory import ProviderFactory
 from .providers.google_translation import GoogleTranslationProvider
@@ -31,6 +32,7 @@ def create_app(
     translation_router=None,
 ) -> Flask:
     """Create a lightweight Flask app without importing model runtimes."""
+    configure_logging()
     app_config = config or load_config(environ)
     app = Flask(
         __name__,
