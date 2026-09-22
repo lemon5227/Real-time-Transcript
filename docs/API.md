@@ -64,7 +64,12 @@ Client payload:
 {"mode":"auto","model":"small","language":"en","sample_rate":48000,"enable_vad":true,"glossary":["gradient descent","eigenvalue"]}
 ```
 
-`mode` is `auto`, `local` or `cloud`. `enable_vad` hands near-silent windows to the provider as digital silence, so a quiet room stops costing inference without moving the transcript timeline. `glossary` is an optional list of course terms: the model receives it as a vocabulary hint where the runtime supports one, and afterwards a listed term replaces a near-miss spelling (`gradien` → `gradient`). When the page sends no list, `AUDIO_GLOSSARY` from the backend environment is used.
+`mode` is `auto`, `local` or `cloud`. `enable_vad` hands near-silent windows to the provider as digital silence, so a quiet room stops costing inference without moving the transcript timeline. `glossary` is an optional list of course terms. Two things use it, and **they do not apply to the same providers**:
+
+- as a **vocabulary hint**, only where the runtime accepts one — the cloud provider and Whisper. Parakeet's MLX runtime is conditioned on audio alone, so on the shipped Mac path the hint is a no-op and a listed term will not stop the model mishearing a name.
+- as a **spelling correction afterwards**, on every path: a listed term replaces a near-miss spelling (`gradien` → `gradient`). This is deliberately tight — the first letter must match and the edit budget is a fifth of the term — so it fixes a misheard *spelling*, never a word the model substituted.
+
+When the page sends no list, `AUDIO_GLOSSARY` from the backend environment is used.
 
 The server normalizes incoming audio to 16 kHz. The acknowledgement and `transcription_session_created` event are returned as soon as the session queue exists, before a local model finishes loading:
 
@@ -109,6 +114,22 @@ The server emits `transcript_segment` as final segments become available:
 ```json
 {"id":"local-1","text":"Today we will discuss…","start_ms":0,"end_ms":3000,"is_final":true,"confidence":null}
 ```
+
+The same event carries a **revision** of a caption the client already has: the id is unchanged, so the
+client updates that line in place instead of appending a second one. The live path re-decodes a
+window that ends at the live edge, so the newest sentence arrives several times as it grows.
+
+The server emits `transcript_segment_removed` when a caption has to be **dropped**:
+
+```json
+{"id":"local-1"}
+```
+
+The client must delete that caption. It happens when a later decode grows one stored caption across
+another that covers the same speech, so the merger folds them into one and only one of the two ids
+survives. A client that ignores this event shows the same sentence twice — which is exactly what the
+event exists to prevent. Treat the id as gone: the surviving caption carries the other id and is
+re-sent as a `transcript_segment` revision.
 
 ### `stop_transcription`
 

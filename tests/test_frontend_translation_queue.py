@@ -66,3 +66,29 @@ if (!context.window.EchoTranslationQueue || typeof context.window.EchoTranslatio
 '''
     result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_final_fragment_does_not_shrink_a_longer_live_sentence():
+    script = r'''
+const { resolve, remainder } = require('./static/transcript-current.js');
+const live = { text: 'When you run your notebooks more times with more and more rows here', start_ms: 1000, end_ms: 8000, is_final: false };
+const final = { text: 'When you run your notebooks', start_ms: 1000, end_ms: 3500, is_final: true };
+const result = resolve(live.text, final, live);
+if (result.text !== live.text || result.provisional !== true) process.exit(1);
+if (remainder(final.text, live.text) !== 'more times with more and more rows here') process.exit(2);
+'''
+    result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_live_sentence_accepts_a_newer_draft_and_exact_final_confirmation():
+    script = r'''
+const { resolve } = require('./static/transcript-current.js');
+const first = resolve('', { text: 'The model is fast', start_ms: 1000, end_ms: 3000, is_final: false }, null);
+const revised = resolve(first.text, { text: 'The model is much faster', start_ms: 1000, end_ms: 4000, is_final: false }, null);
+const confirmed = resolve(revised.text, { text: revised.text, start_ms: 1000, end_ms: 4000, is_final: true }, { ...revised, start_ms: 1000, end_ms: 4000, is_final: false });
+if (revised.text !== 'The model is much faster' || revised.provisional !== true) process.exit(1);
+if (confirmed.text !== revised.text || confirmed.provisional !== false) process.exit(2);
+'''
+    result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout

@@ -47,6 +47,7 @@ def test_latency_docs_do_not_point_at_missing_probes():
         "measure_caption_latency.py",
         "measure_finalize_lag.py",
         "measure_translation_latency.py",
+        "replay_lecture.py",
     ]:
         assert name in docs
         assert (ROOT / "tools" / name).is_file(), name + " is referenced but missing"

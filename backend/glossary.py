@@ -5,7 +5,11 @@ a course-specific term, a formula name. Without help the same word is misspelled
 the same way all term. This module keeps a small user-editable vocabulary and
 uses it two ways:
 
-* as a hint for models that accept a prompt, and
+* as a hint for the models that accept one -- the cloud provider and Whisper.
+  Parakeet's MLX runtime is conditioned on audio alone: ``generate()``,
+  ``transcribe()`` and ``transcribe_stream()`` take no prompt, so the hint does
+  nothing on the path this project actually ships. Only the correction below
+  applies there, and the settings panel says so rather than promising both; and
 * as a conservative spelling correction for the terms that come back close.
 
 Corrections are deliberately tight. A word is only replaced when it is nearly
@@ -134,7 +138,11 @@ class Glossary:
 
     @property
     def prompt(self) -> str:
-        """A vocabulary hint for models that accept an initial prompt."""
+        """A vocabulary hint for the models that accept an initial prompt.
+
+        Cloud and Whisper only. The MLX Parakeet runtime has no prompt input, so
+        reading this from that provider would be a silent no-op.
+        """
         if not self.terms:
             return ""
         prompt = "Vocabulary: " + ", ".join(self.terms) + "."

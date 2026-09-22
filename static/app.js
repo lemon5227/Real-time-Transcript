@@ -902,16 +902,54 @@
     if (!id) return null;
     var nodes = feed.querySelectorAll(".transcript-segment");
     for (var index = 0; index < nodes.length; index += 1) {
-      if (nodes[index] !== state.liveArticle && nodes[index].dataset.segmentId === String(id)) return nodes[index];
+      // A draft row is not a confirmed caption, so an update must not target it.
+      // Keep looking rather than stopping here: a confirmed row for the same id
+      // can sit after the draft one.
+      if (nodes[index] === state.liveArticle) continue;
+      if (nodes[index].dataset.segmentId === String(id)) return nodes[index];
     }
     return null;
+  }
+
+  function removeSegment(id) {
+    if (id === undefined || id === null) return;
+    var key = String(id);
+    var found = state.segments.some(function (segment) {
+      return String(segment.id || segment.segment_id || "") === key;
+    });
+    if (!found) return;
+    state.segments = state.segments.filter(function (segment) {
+      return String(segment.id || segment.segment_id || "") !== key;
+    });
+    // The server retracted this caption because the merger folded it into a
+    // neighbouring one. Leaving the row on screen would show the same sentence
+    // twice, which is the duplicate the retraction exists to remove. Every row
+    // carrying the id goes, because a draft row can share it with the confirmed
+    // caption that replaced it.
+    var nodes = feed.querySelectorAll(".transcript-segment");
+    for (var index = 0; index < nodes.length; index += 1) {
+      var article = nodes[index];
+      if (article.dataset.segmentId !== key) continue;
+      if (article === state.liveArticle) {
+        state.liveArticle = null;
+        state.liveSegment = null;
+      }
+      if (article.parentNode) article.parentNode.removeChild(article);
+    }
+    $("#segment-count").textContent = state.segments.length;
+    scheduleSessionSave();
   }
 
   function addSegment(segment) {
     if (!segment || !segment.text) return;
     var isFinal = segment.is_final !== false;
-    currentText.textContent = segment.text;
-    currentSentence.classList.toggle("is-provisional", !isFinal);
+    var currentDisplay = window.EchoTranscriptCurrent.resolve(
+      currentText.textContent,
+      segment,
+      state.liveSegment
+    );
+    currentText.textContent = currentDisplay.text;
+    currentSentence.classList.toggle("is-provisional", currentDisplay.provisional);
     emptyState.hidden = true;
     if (!isFinal) {
       renderLiveSegment(segment);
@@ -942,10 +980,34 @@
     state.segments.push(segment);
     var article;
     if (state.liveArticle && sameLiveSegment(segment, state.liveSegment)) {
-      article = state.liveArticle;
-      state.liveArticle = null;
-      state.liveSegment = null;
-      renderTranscriptArticle(article, segment, true);
+      var liveRemainder = window.EchoTranscriptCurrent.remainder(
+        segment.text,
+        state.liveSegment.text
+      );
+      if (liveRemainder) {
+        article = document.createElement("article");
+        renderTranscriptArticle(article, segment, true);
+        feed.insertBefore(article, state.liveArticle);
+        var previousLive = state.liveSegment;
+        var remainderStart = Number(previousLive.start_ms) || 0;
+        var finalEnd = Number(segment.end_ms);
+        var liveEnd = Number(previousLive.end_ms);
+        if (Number.isFinite(finalEnd)) {
+          remainderStart = Math.max(remainderStart, finalEnd);
+          if (Number.isFinite(liveEnd)) remainderStart = Math.min(remainderStart, liveEnd);
+        }
+        state.liveSegment = Object.assign({}, previousLive, {
+          text: liveRemainder,
+          start_ms: remainderStart,
+          is_final: false
+        });
+        renderTranscriptArticle(state.liveArticle, state.liveSegment, false);
+      } else {
+        article = state.liveArticle;
+        state.liveArticle = null;
+        state.liveSegment = null;
+        renderTranscriptArticle(article, segment, true);
+      }
     } else {
       article = document.createElement("article");
       renderTranscriptArticle(article, segment, true);
@@ -1718,6 +1780,9 @@
       else syncQuickSettings();
     });
     state.socket.on("transcript_segment", addSegment);
+    state.socket.on("transcript_segment_removed", function (payload) {
+      removeSegment(payload && (payload.id || payload.segment_id));
+    });
     state.socket.on("translation_result", applyTranslationResult);
     state.socket.on("translation_error", function (error) { setTranslationStatus("翻译失败 · 原文仍然可用", true); });
     state.socket.on("audio_backpressure", function (notice) {

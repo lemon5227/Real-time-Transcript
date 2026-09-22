@@ -539,3 +539,56 @@ def test_capture_offset_skips_audio_dropped_before_the_model_started():
     assert timeline.absolute_ms(0) == 12000
     assert timeline.absolute_ms(2500) == 14500
     manager.stop("sid-1")
+
+
+def test_a_retracted_caption_is_announced_to_the_client():
+    """A caption the merger drops must leave the client's screen, not just the server.
+
+    The merger compacts two stored captions into one when a later decode grows
+    one of them across the other. The dropped id has already been rendered, so a
+    removal event is the only thing that stops it being a duplicate for the rest
+    of the lecture.
+    """
+    script = [
+        [TranscriptSegment("a", "the first sentence", 0, 2000, True, None)],
+        [TranscriptSegment("b", "the second sentence", 3000, 6000, True, None)],
+        # Reaches back before "a", so the merger grows "b" across it.
+        [
+            TranscriptSegment(
+                "c", "the second sentence, decoded further back", 0, 7000, True, None
+            )
+        ],
+    ]
+
+    class GrowingProvider(FakeProvider):
+        # Owns its own timeline, so the manager passes provider offsets straight
+        # through and the merger sees the spans this test is about.
+        requires_contiguous_audio = True
+
+        def __init__(self):
+            self.index = 0
+
+        def push(self, _audio):
+            batch = script[self.index] if self.index < len(script) else []
+            self.index += 1
+            return batch
+
+    emitted = []
+    manager = SessionManager(
+        provider_factory=lambda _config: GrowingProvider(),
+        emit=lambda _sid, event, payload: emitted.append((event, payload)),
+        streaming_chunk_seconds=0.2,
+    )
+    config = SessionConfig("local", "fake", "en", 16000, window_seconds=0.2, overlap_seconds=0.0)
+    manager.start("sid-1", config)
+    for sequence in range(len(script)):
+        manager.push_audio("sid-1", _speech(3200), sample_rate=16000, sequence=sequence)
+    result = manager.stop("sid-1")
+
+    removed = [payload for event, payload in emitted if event == "transcript_segment_removed"]
+    assert removed == [{"id": "a"}]
+    # The surviving caption keeps "b"'s id and is re-emitted with its new span.
+    captions = [payload for event, payload in emitted if event == "transcript_segment"]
+    assert [item["id"] for item in captions] == ["a", "b", "b"]
+    assert [item["id"] for item in result["segments"]] == ["b"]
+    assert result["removed_segments"] == 1

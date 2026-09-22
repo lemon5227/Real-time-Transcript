@@ -3,20 +3,35 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 
 import numpy as np
 
 from .audio_pipeline import AudioWindow, AudioWindowBuffer, decode_pcm16_base64
 from .glossary import Glossary
+from .logging_setup import get_logger
 from .models import SessionConfig, TranscriptSegment
 from .providers.base import ProviderError, TranscriptionProvider
 from .segment_merger import SegmentMerger
 from .timeline import CaptureTimeline
 from .voice_gate import VoiceGate
 
+logger = get_logger("session")
+
 ProviderFactoryType = Union[Callable[[SessionConfig], TranscriptionProvider], object]
 EmitCallback = Callable[[str, str, Dict[str, object]], None]
+
+# A session that spends longer decoding than the audio it receives is losing
+# ground; the live caption is about to drift behind the lecturer. Measured over
+# the whole session rather than per chunk: a windowed provider decodes an 18 s
+# window when a 1 s chunk completes a hop, so dividing one decode by the chunk
+# that triggered it says "0.74x" for a path that is really running 25x realtime.
+SLOW_DECODE_REALTIME_RATIO = 0.5
+
+# Falling behind is a condition, not an event, so report it on a timer instead
+# of once per chunk -- a genuinely slow path otherwise writes a line every
+# second and buries everything else in the log.
+SLOW_DECODE_LOG_INTERVAL_SECONDS = 10.0
 
 
 class AdaptiveStreamingChunkPolicy:
@@ -68,6 +83,11 @@ class _SessionState:
     timeline: CaptureTimeline = field(default_factory=CaptureTimeline)
     voice_gate: Optional[VoiceGate] = None
     glossary: Glossary = field(default_factory=Glossary)
+    decode_seconds_total: float = 0.0
+    audio_seconds_total: float = 0.0
+    slow_decode_logged_at: Optional[float] = None
+    emitted_segment_ids: Set[str] = field(default_factory=set)
+    removed_segment_count: int = 0
 
 
 class SessionManager:
@@ -129,6 +149,19 @@ class SessionManager:
             )
             self._sessions[sid] = state
         state.worker.start()
+        logger.info(
+            "会话开始 sid=%s session=%s mode=%s model=%s language=%s "
+            "sample_rate=%s vad=%s window=%.2fs overlap=%.2fs",
+            sid,
+            state.session_id,
+            config.mode,
+            getattr(provider, "model", None) or config.model,
+            config.language,
+            config.sample_rate,
+            config.enable_vad,
+            config.window_seconds,
+            config.overlap_seconds,
+        )
         return {
             "status": "starting",
             "ready": False,
@@ -175,7 +208,14 @@ class SessionManager:
             except queue.Empty:
                 discarded = None
             if isinstance(discarded, _QueuedAudio):
-                state.timeline.mark_dropped(round(discarded.audio.size * 1000 / 16000))
+                dropped_ms = round(discarded.audio.size * 1000 / 16000)
+                state.timeline.mark_dropped(dropped_ms)
+                logger.warning(
+                    "推理落后于录音，丢弃音频 sid=%s 丢弃=%.2fs 队列=%d",
+                    sid,
+                    dropped_ms / 1000,
+                    state.audio_queue.qsize(),
+                )
             state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
             return True
 
@@ -213,6 +253,27 @@ class SessionManager:
             result["error"] = state.error.to_dict()
         if still_closing:
             result["detail"] = "模型仍在加载，稍后会自动释放"
+        segments = result["segments"]
+        if state.audio_seconds_total > 0:
+            result["decode_realtime_ratio"] = round(
+                state.decode_seconds_total / state.audio_seconds_total, 3
+            )
+        if state.removed_segment_count:
+            # Non-zero means the merger had to retract a caption it had already
+            # published. Expected occasionally; a large number means the window
+            # is producing unstable sentence boundaries.
+            result["removed_segments"] = state.removed_segment_count
+        logger.info(
+            "会话结束 sid=%s session=%s 状态=%s 确认字幕=%d 段 撤回=%d 静音跳过=%.2fs 丢弃=%.2fs 实时倍率=%.2fx",
+            sid,
+            state.session_id,
+            result["status"],
+            len(segments) if isinstance(segments, list) else 0,
+            state.removed_segment_count,
+            getattr(state.voice_gate, "skipped_seconds", 0.0),
+            state.timeline.dropped_ms / 1000,
+            result.get("decode_realtime_ratio", 0.0),
+        )
         return result
 
     def cleanup(self, sid: str) -> None:
@@ -252,6 +313,11 @@ class SessionManager:
             "模型启动超时，仍未开始转录",
             "降低模型大小、检查本地依赖，或切换到云端模式",
         )
+        logger.error(
+            "模型启动超时 sid=%s 超时=%.1fs",
+            state.sid,
+            self._startup_timeout_seconds,
+        )
         state.error = error
         self._emit(state.sid, "transcription_error", error.to_dict())
 
@@ -276,7 +342,15 @@ class SessionManager:
         try:
             # MLX streams are thread-affine. Keep provider startup, inference,
             # flush, and close on this same worker thread.
+            startup_started = time.monotonic()
             state.provider.start(state.config)
+            logger.info(
+                "provider 就绪 sid=%s provider=%s model=%s 耗时=%.2fs",
+                state.sid,
+                getattr(state.provider, "name", "unknown"),
+                getattr(state.provider, "model", None),
+                time.monotonic() - startup_started,
+            )
             if state.stop_event.is_set():
                 # Stopped while the model was still loading. Announcing a ready
                 # session now would revive a session the client already ended.
@@ -347,6 +421,17 @@ class SessionManager:
             for segment in state.provider.flush():
                 self._emit_segments(state, [segment], 0)
         except ProviderError as exc:
+            # The message shown in the UI is deliberately generic. The chained
+            # cause is the part that makes a classroom failure diagnosable
+            # afterwards, so it goes to the log with a traceback.
+            logger.error(
+                "provider 错误 sid=%s code=%s message=%s 底层原因=%s",
+                state.sid,
+                exc.code,
+                exc.message,
+                repr(exc.__cause__) if exc.__cause__ is not None else "无",
+                exc_info=exc.__cause__ is not None,
+            )
             if not state.startup_event.is_set():
                 state.startup_error = exc
                 state.error = exc
@@ -356,6 +441,7 @@ class SessionManager:
                 state.error = exc
                 self._emit(state.sid, "transcription_error", exc.to_dict())
         except Exception as exc:
+            logger.exception("转录工作线程异常 sid=%s", state.sid)
             if not state.startup_event.is_set():
                 state.startup_error = ProviderError(
                     "PROVIDER_START_FAILED",
@@ -401,13 +487,48 @@ class SessionManager:
             # received, so skipping costs nothing and saves the request or the
             # inference. A streaming provider must still see the zeros below.
             return
+        inference_started = time.monotonic()
         segments = state.provider.push(audio)
+        decode_seconds = time.monotonic() - inference_started
+        audio_seconds = audio.size / 16000
+        self._record_decode_pace(state, decode_seconds, audio_seconds)
         # Stateful providers such as Parakeet already maintain a continuous
         # timeline. Windowed providers return offsets relative to this window.
         window_origin_ms = (
             0 if getattr(state.provider, "requires_contiguous_audio", False) else window.start_ms
         )
         self._emit_segments(state, segments, window_origin_ms)
+
+    def _record_decode_pace(
+        self, state: _SessionState, decode_seconds: float, audio_seconds: float
+    ) -> None:
+        """Track how much decoding the session is doing per second of audio.
+
+        Naming the ratio makes "the live caption is drifting" measurable instead
+        of something you only notice by watching the page.
+        """
+        if audio_seconds <= 0:
+            return
+        state.decode_seconds_total += decode_seconds
+        state.audio_seconds_total += audio_seconds
+        ratio = state.decode_seconds_total / state.audio_seconds_total
+        if ratio < SLOW_DECODE_REALTIME_RATIO:
+            return
+        now = time.monotonic()
+        if (
+            state.slow_decode_logged_at is not None
+            and now - state.slow_decode_logged_at < SLOW_DECODE_LOG_INTERVAL_SECONDS
+        ):
+            return
+        state.slow_decode_logged_at = now
+        logger.warning(
+            "解码偏慢 sid=%s 累计音频=%.1fs 累计解码=%.1fs 实时倍率=%.2fx 队列=%d",
+            state.sid,
+            state.audio_seconds_total,
+            state.decode_seconds_total,
+            ratio,
+            state.audio_queue.qsize(),
+        )
 
     def _emit_segments(
         self,
@@ -434,7 +555,34 @@ class SessionManager:
                     confidence=segment.confidence,
                 )
             )
-        for segment in state.merger.add(final_segments):
+        outcome = state.merger.add(final_segments)
+        for segment_id in outcome.removed_ids:
+            # The merger compacted two stored captions into one, so this id no
+            # longer exists on the server. Telling the client is not optional:
+            # without it the duplicate stays on screen for the rest of the
+            # lecture, which is the defect this event was added to close.
+            state.emitted_segment_ids.discard(segment_id)
+            state.removed_segment_count += 1
+            logger.info("撤回字幕 sid=%s id=%s", state.sid, segment_id)
+            self._emit(state.sid, "transcript_segment_removed", {"id": segment_id})
+        for segment in outcome.segments:
+            # The confirmed caption is the artefact a bad live transcript gets
+            # judged on, so it is logged verbatim rather than summarised. The id
+            # and the new/revised marker are here because the merger reuses the
+            # id when it replaces an earlier decode: without them the log cannot
+            # tell "the caption was corrected in place" from "the feed is full
+            # of near-duplicates", which is the first thing worth knowing.
+            revised = segment.id in state.emitted_segment_ids
+            state.emitted_segment_ids.add(segment.id)
+            logger.info(
+                "确认字幕 sid=%s id=%s %s %d-%dms %s",
+                state.sid,
+                segment.id,
+                "更新" if revised else "新增",
+                segment.start_ms,
+                segment.end_ms,
+                segment.text,
+            )
             self._emit(state.sid, "transcript_segment", segment.to_dict())
         for segment in segments:
             if segment.is_final:
@@ -442,6 +590,7 @@ class SessionManager:
             text = state.glossary.correct(segment.text).strip()
             if not text:
                 continue
+            logger.debug("草稿字幕 sid=%s %s", state.sid, text)
             candidate = TranscriptSegment(
                 id=segment.id,
                 text=text,

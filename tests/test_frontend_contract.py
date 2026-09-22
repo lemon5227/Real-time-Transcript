@@ -347,11 +347,15 @@ def test_latency_probe_reports_streaming_chunk_separately_from_window():
 
 def test_live_workbench_renders_one_updating_live_row_in_history_feed():
     app = create_app({})
+    html = app.test_client().get("/").get_data(as_text=True)
     javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
     stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
 
     for hook in ["liveSegment", "renderLiveSegment", "sameLiveSegment", "正在识别 · 会自动更新"]:
         assert hook in javascript
+    assert html.index("transcript-current.js") < html.index("app.js")
+    assert "EchoTranscriptCurrent.resolve" in javascript
+    assert "EchoTranscriptCurrent.remainder" in javascript
     assert "is-live-segment" in stylesheet
 
 
@@ -403,3 +407,19 @@ def test_mac_runtime_install_and_ui_contracts():
     assert "Mac MLX" in html
     for hook in ["recommended_model", "local.runtime", "model.runtime", "运行时"]:
         assert hook in javascript or hook in html
+
+
+def test_frontend_drops_a_caption_the_server_retracts():
+    """The live feed must handle the removal event, not only add-or-update.
+
+    The merger folds a stored caption into its neighbour when a later decode
+    grows across it, and tells the client which id to drop. A frontend that only
+    listens for ``transcript_segment`` leaves that caption on screen as a
+    duplicate for the rest of the lecture.
+    """
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+    assert "transcript_segment_removed" in javascript
+    assert "function removeSegment" in javascript
+    # The row has to leave the DOM and the stored transcript, not just one of them.
+    assert "removeChild(article)" in javascript
+    assert "state.segments.filter" in javascript
