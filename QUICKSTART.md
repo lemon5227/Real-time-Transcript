@@ -34,11 +34,12 @@ brew install librsvg
 
 Users drag **拾句** from the DMG to Applications and open it. If macOS blocks
 an unsigned local build, use **Control-click → Open** for the first launch.
-The app keeps the writable environment, `.env`, logs, caches, and model weights
-outside the bundle in `~/Library/Application Support/拾句`.
-Model weights download through the model manager on first use; they are not
-embedded in the DMG. The repository commands above continue to use the local
-`.venv` and `.env` exactly as before.
+The app keeps its writable environment, `.env`, logs, and PID files outside the
+bundle in `~/Library/Application Support/拾句`. Hugging Face models use the
+existing `HF_HUB_CACHE`/`HF_HOME`, or `~/.cache/huggingface/hub` by default, so
+models already present on the Mac are reused. Whisper weights use the app's
+private runtime cache. No model weights are embedded in the DMG. The repository
+commands above continue to use the local `.venv` and `.env` exactly as before.
 
 ## 1. Prepare the core app
 

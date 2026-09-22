@@ -38,9 +38,10 @@ chmod 700 "$RUNTIME_ROOT" "$LOG_ROOT" "$PID_ROOT"
 export TRANSCRIPT_RUNTIME_DIR="$RUNTIME_ROOT"
 export TRANSCRIPT_ENV_FILE="$ENV_FILE"
 export PYTHONUNBUFFERED=1
+default_xdg_cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RUNTIME_ROOT/.cache}"
-export HF_HOME="${HF_HOME:-$RUNTIME_ROOT/.cache/huggingface}"
-export HF_HUB_CACHE="${HF_HUB_CACHE:-$RUNTIME_ROOT/.cache/huggingface/hub}"
+export HF_HOME="${HF_HOME:-$default_xdg_cache_home/huggingface}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 export WHISPER_CACHE_DIR="${WHISPER_CACHE_DIR:-$RUNTIME_ROOT/.cache/whisper}"
 
 child_pid=""
@@ -71,15 +72,26 @@ health_check() {
 wait_for_health() {
   local timeout_seconds="$1"
   local watched_pid="${2:-$child_pid}"
-  local deadline=$((SECONDS + timeout_seconds))
-  while (( SECONDS < deadline )); do
+  # The budget starts here, not at shell start: resolving the interpreter and
+  # preparing the runtime directories can take a second or two, and counting
+  # that against the startup timeout left short timeouts with no real chance.
+  # Polling every second was the second half of the problem -- the first check
+  # fires the instant the child is spawned, before it can possibly have bound
+  # its port, so a two second budget bought a single useful retry. Sub-second
+  # polling gives the whole budget to the server. (Bash 3.2 on macOS has no
+  # EPOCHREALTIME, so this counts attempts rather than seconds.)
+  local interval="0.2"
+  local attempts=$((timeout_seconds * 5))
+  (( attempts < 1 )) && attempts=1
+  local attempt
+  for ((attempt = 0; attempt < attempts; attempt++)); do
     if health_check; then
       return 0
     fi
     if [[ -n "$watched_pid" ]] && ! kill -0 "$watched_pid" 2>/dev/null; then
       return 1
     fi
-    sleep 1
+    sleep "$interval"
   done
   return 1
 }

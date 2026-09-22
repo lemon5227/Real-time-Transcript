@@ -157,6 +157,98 @@ def test_macos_launcher_exports_the_port_it_waits_for_to_the_server(
                 pass
 
 
+@pytest.mark.parametrize(
+    ("cache_setting", "expected_cache"),
+    [
+        (None, ".cache/huggingface/hub"),
+        ("XDG_CACHE_HOME", "custom-xdg/huggingface/hub"),
+        ("HF_HOME", "custom-hf-home/hub"),
+        ("HF_HUB_CACHE", "custom-hf-hub"),
+    ],
+)
+def test_macos_launcher_reuses_the_existing_huggingface_cache(
+    tmp_path, cache_setting, expected_cache
+):
+    contents = tmp_path / "拾句.app" / "Contents"
+    launcher_dir = contents / "MacOS"
+    source_root = contents / "Resources" / "app"
+    local_bin = tmp_path / ".local" / "bin"
+    support_root = tmp_path / "support"
+    port_capture = tmp_path / "server-port"
+    cache_capture = tmp_path / "hf-cache"
+    launcher_dir.mkdir(parents=True)
+    source_root.mkdir(parents=True)
+    local_bin.mkdir(parents=True)
+    (source_root / "quickstart.py").write_text("# fake bootstrap entrypoint\n", encoding="utf-8")
+
+    launcher = launcher_dir / "RealTimeTranscript"
+    launcher.write_text(LAUNCHER_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    launcher.chmod(0o755)
+
+    fake_python = local_bin / "python3.13"
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        "printf '%s' \"${PORT:-unset}\" > \"$PORT_CAPTURE\"\n"
+        "printf '%s' \"${HF_HUB_CACHE:-unset}\" > \"$CACHE_CAPTURE\"\n"
+        "exec /bin/sleep 20\n",
+        encoding="utf-8",
+    )
+    fake_curl = local_bin / "curl"
+    fake_curl.write_text(
+        "#!/bin/bash\n"
+        "url=\"\"\nfor argument in \"$@\"; do url=\"$argument\"; done\n"
+        "server_port=\"$(cat \"$PORT_CAPTURE\" 2>/dev/null || true)\"\n"
+        "[[ \"$server_port\" != unset && \"$url\" == \"http://127.0.0.1:${server_port}/api/health\" ]]\n",
+        encoding="utf-8",
+    )
+    for executable in [fake_python, fake_curl]:
+        executable.chmod(0o755)
+    for name in ["open", "osascript"]:
+        stub = local_bin / name
+        stub.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+    environment = os.environ.copy()
+    for name in ["PORT", "XDG_CACHE_HOME", "HF_HOME", "HF_HUB_CACHE"]:
+        environment.pop(name, None)
+    environment.update(
+        {
+            "HOME": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+            "PORT_CAPTURE": str(port_capture),
+            "CACHE_CAPTURE": str(cache_capture),
+            "TRANSCRIPT_APP_SUPPORT_DIR": str(support_root),
+            "TRANSCRIPT_STARTUP_TIMEOUT_SECONDS": "2",
+        }
+    )
+    if cache_setting == "XDG_CACHE_HOME":
+        environment[cache_setting] = str(tmp_path / "custom-xdg")
+    elif cache_setting == "HF_HOME":
+        environment[cache_setting] = str(tmp_path / "custom-hf-home")
+    elif cache_setting == "HF_HUB_CACHE":
+        environment[cache_setting] = str(tmp_path / "custom-hf-hub")
+
+    try:
+        result = subprocess.run(
+            ["/bin/bash", str(launcher)],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert cache_capture.read_text(encoding="utf-8") == str(tmp_path / expected_cache)
+    finally:
+        pid_file = support_root / "pids" / "server.pid"
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
+
+
 def test_macos_bundle_metadata_declares_app_icon_and_runtime_entrypoint():
     root = ElementTree.parse(PLIST_PATH).getroot()
     children = list(root.find("dict"))

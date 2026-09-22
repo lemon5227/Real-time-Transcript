@@ -70,14 +70,17 @@ Applications. An unsigned local build may be blocked on first launch; use
 source files independently of the current working directory, creates
 `~/Library/Application Support/拾句/{runtime,logs,pids}`, and
 exports `TRANSCRIPT_RUNTIME_DIR` and `TRANSCRIPT_ENV_FILE`. This keeps the
-`.env`, Python environment, caches, logs, recordings, and model weights out of
-the app bundle. Model weights are downloaded only when the user chooses a
-model in the app, so installing the DMG does not silently download gigabytes.
+`.env`, Python environment, logs, and PID files out of the app bundle. Hugging
+Face models use `HF_HUB_CACHE` or `HF_HOME` when configured, and otherwise use
+`~/.cache/huggingface/hub` to reuse models already downloaded by other local
+tools. Whisper weights use the app's private runtime cache. Model weights are
+downloaded only when a selected model is not already cached; installing the
+DMG does not silently download gigabytes.
 
 To reset a packaged installation, quit the browser/server and remove the
-`~/Library/Application Support/拾句` directory. Source
-checkout startup remains unchanged and continues to use `.venv` and `.env` in
-the repository.
+`~/Library/Application Support/拾句` directory. This leaves Hugging Face models
+in the shared cache untouched. Source checkout startup remains unchanged and
+continues to use `.venv` and `.env` in the repository.
 
 ### GitHub Actions release build
 
