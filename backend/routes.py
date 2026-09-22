@@ -137,6 +137,14 @@ def register_routes(app: Flask, config: AppConfig) -> None:
                 "startup_timeout_seconds": config.audio_startup_timeout_seconds,
                 "streaming_chunk_seconds": config.streaming_chunk_seconds,
                 "streaming_lag_seconds": config.streaming_confirmation_lag_seconds,
+                # Mirrors `AppConfig.public_dict()`; this block is built by hand
+                # rather than delegating, so keep the two in step.
+                "live": {
+                    "mode": config.mlx_live_mode,
+                    "window_seconds": config.mlx_window_seconds,
+                    "hop_seconds": config.mlx_hop_seconds,
+                    "confirmation_lag_seconds": config.live_confirmation_lag_seconds,
+                },
             },
             "translation": config.public_dict()["translation"],
         })

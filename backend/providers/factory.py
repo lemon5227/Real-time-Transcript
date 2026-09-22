@@ -13,6 +13,7 @@ from .mlx_parakeet import (
     MlxParakeetProvider,
     mlx_runtime_available,
 )
+from .mlx_windowed import MlxWindowedParakeetProvider
 
 
 class AutoFallbackProvider:
@@ -139,9 +140,19 @@ class ProviderFactory:
                     "Mac MLX 转录依赖或模型不可用",
                     "请安装 requirements-mac.txt，或切换到云端模式",
                 )
-            return MlxParakeetProvider(
+            if self.config.mlx_live_mode == "streaming":
+                return MlxParakeetProvider(
+                    PARAKEET_MODEL_REF,
+                    right_context=self.config.mlx_stream_right_context,
+                    model_cache=self._mlx_model_cache,
+                )
+            # Default: re-decode a sliding window in full context. The
+            # incremental decoder is faster to start but produces unusable live
+            # captions on real accented lecture audio.
+            return MlxWindowedParakeetProvider(
                 PARAKEET_MODEL_REF,
-                right_context=self.config.mlx_stream_right_context,
+                window_seconds=self.config.mlx_window_seconds,
+                hop_seconds=self.config.mlx_hop_seconds,
                 model_cache=self._mlx_model_cache,
             )
 

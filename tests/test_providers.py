@@ -2,6 +2,7 @@ import base64
 import importlib
 import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -393,6 +394,79 @@ def test_mlx_model_cache_keeps_different_sessions_exclusive():
     assert acquired
 
 
+def test_mlx_model_source_prefers_a_cached_snapshot(monkeypatch, tmp_path):
+    """A pre-downloaded model must load with no network at all.
+
+    parakeet_mlx's from_pretrained() asks the Hub first and, when that call
+    fails, falls back to treating the repo id as a filesystem path -- which then
+    fails even though the weights are already cached. Resolving the snapshot up
+    front keeps class startup working on unreliable Wi-Fi.
+    """
+    from backend.providers import mlx_parakeet
+
+    snapshot = tmp_path / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    calls = []
+
+    def fake_snapshot_download(repo_id, local_files_only=False):
+        calls.append((repo_id, local_files_only))
+        return str(snapshot)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(snapshot_download=fake_snapshot_download),
+    )
+
+    resolved = mlx_parakeet.resolve_local_model_source("mlx-community/parakeet-tdt-0.6b-v3")
+
+    assert resolved == str(snapshot)
+    assert calls == [("mlx-community/parakeet-tdt-0.6b-v3", True)]
+
+
+def test_mlx_model_source_returns_none_for_an_uncached_repo(monkeypatch):
+    """Uncached models must fall through to the normal download path."""
+    from backend.providers import mlx_parakeet
+
+    def missing(*_args, **_kwargs):
+        raise OSError("not cached")
+
+    monkeypatch.setitem(
+        sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=missing)
+    )
+
+    assert mlx_parakeet.resolve_local_model_source("mlx-community/parakeet-tdt-0.6b-v3") is None
+
+
+def test_mlx_model_source_accepts_an_explicit_local_directory(tmp_path):
+    from backend.providers.mlx_parakeet import resolve_local_model_source
+
+    assert resolve_local_model_source(str(tmp_path)) == str(tmp_path)
+
+
+def test_mlx_default_loader_hands_the_cached_snapshot_to_parakeet(monkeypatch, tmp_path):
+    from backend.providers import mlx_parakeet
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    seen = []
+    monkeypatch.setattr(
+        mlx_parakeet, "resolve_local_model_source", lambda _ref: str(snapshot)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "parakeet_mlx",
+        SimpleNamespace(
+            from_pretrained=lambda source, **_: seen.append(source) or object()
+        ),
+    )
+
+    model = mlx_parakeet.MlxModelCache._load_default("mlx-community/parakeet-tdt-0.6b-v3")
+
+    assert seen == [str(snapshot)]
+    assert model is not None
+
+
 @pytest.mark.parametrize(
     "given,expected",
     [(0, 1), (-5, 1), (9999, 256), ("not-an-int", 32), (None, 32)],
@@ -411,7 +485,9 @@ def test_factory_passes_the_configured_right_context_to_the_mlx_provider():
     from backend.device import DeviceProfile
     from backend.providers.mlx_parakeet import PARAKEET_MODEL_ID
 
-    config = load_config({"MLX_STREAM_RIGHT_CONTEXT": "8"})
+    config = load_config(
+        {"MLX_STREAM_RIGHT_CONTEXT": "8", "MLX_LIVE_MODE": "streaming"}
+    )
     factory = ProviderFactory(
         config,
         local_available=lambda _model: True,
@@ -421,6 +497,27 @@ def test_factory_passes_the_configured_right_context_to_the_mlx_provider():
     provider = factory.create(SessionConfig("local", PARAKEET_MODEL_ID, "en", 16000))
 
     assert provider._right_context == 8
+
+
+def test_factory_defaults_the_mlx_live_path_to_windowed_decoding():
+    """The incremental decoder is unusable on real accented lecture audio."""
+    from backend.device import DeviceProfile
+    from backend.providers.mlx_parakeet import PARAKEET_MODEL_ID
+    from backend.providers.mlx_windowed import MlxWindowedParakeetProvider
+
+    config = load_config({"MLX_WINDOW_SECONDS": "12", "MLX_HOP_SECONDS": "1.5"})
+    factory = ProviderFactory(
+        config,
+        local_available=lambda _model: True,
+        device_profile=DeviceProfile("mps", "apple", None, "balanced"),
+    )
+
+    provider = factory.create(SessionConfig("local", PARAKEET_MODEL_ID, "en", 16000))
+
+    assert isinstance(provider, MlxWindowedParakeetProvider)
+    assert provider.window_seconds == 12.0
+    assert provider.hop_seconds == 1.5
+    assert provider.requires_contiguous_audio is True
 
 
 def test_mlx_provider_maps_stream_sentences_to_segments():
@@ -760,7 +857,7 @@ def test_mlx_provider_splits_unpunctuated_run_on_a_natural_pause():
 
     class Stream:
         finalized_tokens = [
-            Token(" first thought", 0.2, 0.4),
+            Token(" first thought ends here", 0.2, 0.4),
             Token(" second thought", 1.0, 1.2),
         ]
         draft_tokens = []
@@ -792,8 +889,57 @@ def test_mlx_provider_splits_unpunctuated_run_on_a_natural_pause():
     result = provider.push(np.zeros(16000, dtype=np.float32))
 
     assert [(item.text, item.is_final) for item in result] == [
-        ("first thought", True),
+        ("first thought ends here", True),
         ("second thought", False),
+    ]
+
+
+def test_mlx_provider_does_not_confirm_single_words_at_natural_pauses():
+    from backend.providers.mlx_parakeet import MlxParakeetProvider
+
+    class Token:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+
+    class Stream:
+        def __init__(self):
+            self.finalized_tokens = [
+                Token(" move", 0.0, 0.2),
+                Token(" there", 0.8, 1.0),
+                Token(" makes", 1.6, 1.8),
+                Token(" sense.", 2.4, 2.8),
+            ]
+            self.draft_tokens = []
+            self.mel_buffer = SimpleNamespace(shape=(1, 100))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_audio(self, _audio):
+            return None
+
+    stream = Stream()
+
+    class Model:
+        preprocessor_config = SimpleNamespace(sample_rate=16000, hop_length=160)
+
+        def transcribe_stream(self, **_kwargs):
+            return stream
+
+    provider = MlxParakeetProvider(
+        "mlx-community/parakeet-tdt-0.6b-v3", loader=lambda **_: Model()
+    )
+    provider.start(SessionConfig("local", "parakeet-tdt-0.6b-v3", "en", 16000))
+
+    result = provider.push(np.zeros(16000, dtype=np.float32))
+
+    assert [(segment.text, segment.is_final) for segment in result] == [
+        ("move there makes sense.", True)
     ]
 
 
@@ -983,3 +1129,21 @@ def test_cpu_factory_selects_standard_provider():
     provider = factory.create(SessionConfig("local", "small", "en", 16000))
 
     assert provider.name == "local"
+
+
+def test_only_prompt_capable_providers_read_the_glossary_hint():
+    """Parakeet's MLX runtime is conditioned on audio alone.
+
+    Its ``generate()``, ``transcribe()`` and ``transcribe_stream()`` take no
+    prompt, so reading the vocabulary hint there would be a silent no-op -- and
+    the settings panel used to promise the hint applied on every path. Cloud and
+    Whisper are the only providers whose API accepts one.
+    """
+    providers = Path(__file__).resolve().parents[1] / "backend" / "providers"
+    reading_the_hint = {
+        path.name
+        for path in providers.glob("*.py")
+        if "prompt" in path.read_text(encoding="utf-8")
+    }
+
+    assert reading_the_hint == {"cloud_transcription.py", "local_whisper.py"}

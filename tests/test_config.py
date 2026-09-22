@@ -69,6 +69,28 @@ def test_public_config_reports_the_streaming_confirmation_lag():
     assert config.streaming_confirmation_lag_seconds == pytest.approx(2.56)
 
 
+def test_public_config_describes_the_active_live_decoder():
+    """The windowed default must be distinguishable from the streaming fallback.
+
+    `streaming_lag_seconds` is 1.28s out of the box, which is the delay of a path
+    that is not running -- a client that reads only that field would expect the
+    shipped configuration to lag when it does not.
+    """
+    config = load_config({})
+    live = config.public_dict()["audio"]["live"]
+    assert live["mode"] == "windowed"
+    assert live["window_seconds"] == pytest.approx(18.0)
+    assert live["hop_seconds"] == pytest.approx(2.0)
+    assert live["confirmation_lag_seconds"] == 0.0
+
+
+def test_the_streaming_fallback_reports_its_own_lag():
+    config = load_config({"MLX_LIVE_MODE": "streaming", "MLX_STREAM_RIGHT_CONTEXT": "16"})
+    live = config.public_dict()["audio"]["live"]
+    assert live["mode"] == "streaming"
+    assert live["confirmation_lag_seconds"] == pytest.approx(16 * 0.08)
+
+
 def test_public_config_never_contains_api_key():
     config = load_config({
         "CLOUD_BASE_URL": "https://example.test/v1",

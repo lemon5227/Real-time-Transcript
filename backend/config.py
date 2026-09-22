@@ -36,6 +36,13 @@ def _parse_float(value: str, name: str, minimum: float) -> float:
     return parsed
 
 
+def _parse_choice(value: str, name: str, allowed: Tuple[str, ...]) -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate not in allowed:
+        raise ValueError("%s must be one of %s" % (name, ", ".join(allowed)))
+    return candidate
+
+
 @dataclass(frozen=True)
 class AppConfig:
     secret_key: str
@@ -70,6 +77,12 @@ class AppConfig:
     audio_startup_timeout_seconds: float
     streaming_chunk_seconds: float
     mlx_stream_right_context: int
+    # Live caption strategy on Apple Silicon. "windowed" re-decodes a sliding
+    # window in full context, which is what keeps a real accented lecture
+    # readable; "streaming" is the original incremental decoder.
+    mlx_live_mode: str
+    mlx_window_seconds: float
+    mlx_hop_seconds: float
 
     @property
     def streaming_confirmation_lag_seconds(self) -> float:
@@ -80,6 +93,19 @@ class AppConfig:
         sync with `ENCODER_FRAME_SECONDS` in providers/mlx_parakeet.py.
         """
         return round(self.mlx_stream_right_context * 0.08, 3)
+
+    @property
+    def live_confirmation_lag_seconds(self) -> float:
+        """How long the *active* live decoder holds audio back before confirming.
+
+        Only the streaming decoder withholds a right context. The default windowed
+        path ends its window at the live edge, so it has no such lag -- reporting
+        the streaming figure unconditionally told clients to expect 1.28s of delay
+        that the shipped configuration does not have.
+        """
+        if self.mlx_live_mode == "streaming":
+            return self.streaming_confirmation_lag_seconds
+        return 0.0
 
     @property
     def cloud_configured(self) -> bool:
@@ -134,6 +160,15 @@ class AppConfig:
                 "startup_timeout_seconds": self.audio_startup_timeout_seconds,
                 "streaming_chunk_seconds": self.streaming_chunk_seconds,
                 "streaming_lag_seconds": self.streaming_confirmation_lag_seconds,
+                # What the live decoder is actually configured to do. Without this
+                # a client cannot tell the windowed default from the streaming
+                # fallback, or why `streaming_lag_seconds` does not apply to it.
+                "live": {
+                    "mode": self.mlx_live_mode,
+                    "window_seconds": self.mlx_window_seconds,
+                    "hop_seconds": self.mlx_hop_seconds,
+                    "confirmation_lag_seconds": self.live_confirmation_lag_seconds,
+                },
             },
             "translation": {
                 "google": {
@@ -275,5 +310,16 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         ),
         mlx_stream_right_context=_parse_int(
             source.get("MLX_STREAM_RIGHT_CONTEXT", "32"), "MLX_STREAM_RIGHT_CONTEXT", 1
+        ),
+        mlx_live_mode=_parse_choice(
+            source.get("MLX_LIVE_MODE", "windowed"),
+            "MLX_LIVE_MODE",
+            ("windowed", "streaming"),
+        ),
+        mlx_window_seconds=_parse_float(
+            source.get("MLX_WINDOW_SECONDS", "18.0"), "MLX_WINDOW_SECONDS", 4.0
+        ),
+        mlx_hop_seconds=_parse_float(
+            source.get("MLX_HOP_SECONDS", "2.0"), "MLX_HOP_SECONDS", 0.1
         ),
     )

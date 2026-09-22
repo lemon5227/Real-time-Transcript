@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import importlib.util
 import threading
+import time
 from copy import copy
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
+from ..logging_setup import get_logger
 from ..models import SessionConfig, TranscriptSegment
 from .base import ProviderError
+
+logger = get_logger("mlx")
 
 PARAKEET_LANGUAGES = {
     "bg",
@@ -53,8 +58,17 @@ PARAKEET_RIGHT_CONTEXT_MIN = 1
 PARAKEET_RIGHT_CONTEXT_MAX = 256
 ENCODER_FRAME_SECONDS = 0.08
 MIN_SILENCE_GAP_SECONDS = 0.45
+MIN_WORDS_FOR_PAUSE_SPLIT = 4
 MIN_WORDS_FOR_FORCED_SPLIT = 20
 MAX_UNPUNCTUATED_SEGMENT_SECONDS = 8.0
+
+# parakeet_mlx switches the encoder to *local* attention when this is False.
+# Local attention is cheap but on real accented lecture audio it degrades the
+# live caption into word salad, while the batch path stays readable -- measured
+# on a 40s classroom excerpt, the local-attention stream produced unusable text
+# in 21.1s where the original-attention stream produced partially readable text
+# in 12.4s. Keeping the model's own attention is both better and faster.
+PARAKEET_KEEP_ORIGINAL_ATTENTION = True
 
 
 def mlx_runtime_available() -> bool:
@@ -62,6 +76,32 @@ def mlx_runtime_available() -> bool:
         return importlib.util.find_spec("parakeet_mlx") is not None
     except (ImportError, ValueError):
         return False
+
+
+def resolve_local_model_source(model_ref: str) -> Optional[str]:
+    """Return a cached local snapshot for a Hub repo id, or None.
+
+    Classroom Wi-Fi is unreliable and the model is normally pre-downloaded
+    before class, so a snapshot already on disk should be used directly.
+    ``parakeet_mlx.from_pretrained`` calls ``hf_hub_download`` first and, when
+    that raises, falls back to treating the repo id as a filesystem path -- which
+    then fails with a misleading ``No such file or directory:
+    mlx-community/...`` error even though the weights are cached. Resolving the
+    snapshot up front keeps the model loadable with no network at all.
+    """
+    if not model_ref:
+        return None
+    direct = Path(model_ref).expanduser()
+    if direct.is_dir():
+        return str(direct)
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        return None
+    try:
+        return snapshot_download(model_ref, local_files_only=True)
+    except Exception:
+        return None
 
 
 class MlxModelCache:
@@ -77,7 +117,7 @@ class MlxModelCache:
     def _load_default(model_ref: str) -> object:
         from parakeet_mlx import from_pretrained
 
-        return from_pretrained(model_ref)
+        return from_pretrained(resolve_local_model_source(model_ref) or model_ref)
 
     def acquire(self, model_ref: str) -> object:
         with self._guard:
@@ -118,12 +158,14 @@ class MlxParakeetProvider:
         loader: Optional[Callable[..., object]] = None,
         right_context: int = PARAKEET_RIGHT_CONTEXT_DEFAULT,
         model_cache: Optional[MlxModelCache] = None,
+        keep_original_attention: bool = PARAKEET_KEEP_ORIGINAL_ATTENTION,
     ):
         self.model = model_ref
         self._loader = loader
         self._model_cache = model_cache
         self._model_cache_acquired = False
         self._right_context = self._clamp_right_context(right_context)
+        self._keep_original_attention = bool(keep_original_attention)
         self._model = None
         self._stream = None
         self._audio_converter = None
@@ -167,6 +209,7 @@ class MlxParakeetProvider:
                 "将讲课语言改为 English，或切换到云端",
             )
         try:
+            load_started = time.monotonic()
             if self._loader is not None:
                 self._model = self._loader(model_ref=self.model)
             elif self._model_cache is not None:
@@ -180,7 +223,9 @@ class MlxParakeetProvider:
                 from parakeet_mlx import from_pretrained
 
                 self._audio_converter = mx.array
-                self._model = from_pretrained(self.model)
+                self._model = from_pretrained(
+                    resolve_local_model_source(self.model) or self.model
+                )
             if self._model is None:
                 raise ImportError("parakeet_mlx returned no model")
             stream = self._model.transcribe_stream(
@@ -190,14 +235,28 @@ class MlxParakeetProvider:
                 # ENCODER_FRAME_SECONDS of confirmation lag (64 frames used to
                 # hold captions back by 5.12s).
                 context_size=(PARAKEET_LEFT_CONTEXT, self._right_context),
-                keep_original_attention=False,
+                keep_original_attention=self._keep_original_attention,
             )
             self._stream = stream.__enter__()
+            logger.info(
+                "MLX 流已启动 model=%s 加载=%.2fs left=%d right=%d 原始注意力=%s 确认延迟=%.2fs",
+                self.model,
+                time.monotonic() - load_started,
+                PARAKEET_LEFT_CONTEXT,
+                self._right_context,
+                self._keep_original_attention,
+                self.confirmation_lag_seconds(),
+            )
         except ProviderError:
             self._release_model_cache()
             raise
         except Exception as exc:
             self._release_model_cache()
+            # The generic message hides whether the weights, the runtime or the
+            # audio pipeline failed, which made this error hard to act on.
+            logger.exception(
+                "MLX 模型或流启动失败 model=%s 原因=%r", self.model, exc
+            )
             raise ProviderError(
                 "MLX_RUNTIME_UNAVAILABLE",
                 "Mac MLX 本地转录依赖未安装或模型无法加载",
@@ -364,7 +423,10 @@ class MlxParakeetProvider:
                         getattr(token, "duration", 0.0) or 0.0
                     )
                 token_end = float(token_end or 0.0)
-                has_natural_pause = next_start - token_end >= MIN_SILENCE_GAP_SECONDS
+                has_natural_pause = (
+                    next_start - token_end >= MIN_SILENCE_GAP_SECONDS
+                    and words_so_far >= MIN_WORDS_FOR_PAUSE_SPLIT
+                )
                 sentence_start_time = float(
                     getattr(tokens[sentence_start], "start", 0.0) or 0.0
                 )

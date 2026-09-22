@@ -60,6 +60,20 @@ def test_capabilities_expose_the_streaming_latency_knobs():
     assert audio["streaming_lag_seconds"] == pytest.approx(16 * 0.08)
 
 
+def test_capabilities_expose_the_active_live_decoder():
+    """`audio` is built by hand here rather than from `public_dict()`, so this
+    guards the two copies against drifting apart."""
+    app = create_app({"MLX_WINDOW_SECONDS": "12", "MLX_HOP_SECONDS": "3"})
+    audio = app.test_client().get("/api/capabilities").get_json()["audio"]
+
+    assert audio["live"] == {
+        "mode": "windowed",
+        "window_seconds": 12.0,
+        "hop_seconds": 3.0,
+        "confirmation_lag_seconds": 0.0,
+    }
+
+
 def test_health_endpoint_is_available():
     app = create_app({})
     assert app.test_client().get("/api/health").get_json()["status"] == "ok"

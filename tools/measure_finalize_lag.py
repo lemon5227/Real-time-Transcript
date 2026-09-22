@@ -1,9 +1,14 @@
 """Show when the MLX Parakeet stream confirms tokens, and how far behind it runs.
 
-This drives the model directly (no server, no browser) so it isolates the single
-biggest contributor to caption lag: the streaming decoder refuses to finalize the
-last ``context_size[1]`` encoder frames. One encoder frame is
+This drives the streaming decoder directly (no server, no browser) so it isolates
+the biggest contributor to lag *on the streaming path*: the decoder refuses to
+finalize the last ``context_size[1]`` encoder frames. One encoder frame is
 8 (subsampling) * 160 (hop) / 16000 = 0.08s, so the lag is ``right_context * 0.08``.
+
+Note that the streaming path is no longer the shipped live decoder -- see
+docs/LATENCY.md. The default is a sliding window decoded in batch, which has no
+right-context lag at all. Use this tool when investigating
+``MLX_LIVE_MODE=streaming``.
 
 Usage:
     .venv/bin/python tools/measure_finalize_lag.py [right_context] [audio.wav]
@@ -18,6 +23,8 @@ import wave
 import mlx.core as mx
 import numpy as np
 from parakeet_mlx import from_pretrained
+
+from backend.providers.mlx_parakeet import PARAKEET_KEEP_ORIGINAL_ATTENTION
 
 SAMPLE_RATE = 16000
 MODEL_REF = "mlx-community/parakeet-tdt-0.6b-v3"
@@ -48,11 +55,16 @@ def main() -> None:
     )
 
     model = from_pretrained(MODEL_REF)
+    # Kept in step with the provider so this tool measures what the app measures.
+    # Setting it to False swaps the encoder to local attention and the transcript
+    # degrades to word salad; that is how the streaming default was diagnosed.
     stream = model.transcribe_stream(
-        context_size=(256, right_context), keep_original_attention=False
+        context_size=(256, right_context),
+        keep_original_attention=PARAKEET_KEEP_ORIGINAL_ATTENTION,
     )
     stream.__enter__()
     print("drop_size=%d frames" % stream.drop_size)
+    print("keep_original_attention=%s" % PARAKEET_KEEP_ORIGINAL_ATTENTION)
     print("-" * 78)
 
     first_final_at = None
