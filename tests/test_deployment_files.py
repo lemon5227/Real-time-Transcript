@@ -60,6 +60,50 @@ def test_ci_runs_lint_tests_and_browser_javascript():
     assert "node --check" in content
 
 
+def test_every_module_the_suite_patches_is_installed_for_development():
+    """A test that patches `requests.post` needs `requests` in the *dev* environment.
+
+    `requirements-core.txt` deliberately omits `requests` — only the cloud and translation
+    providers need it, and they turn a missing import into `CLOUD_DEPENDENCY_MISSING`. The
+    provider tests do not import it either; they reach it through
+    `monkeypatch.setattr("requests.post", ...)`, which imports the module by name at call
+    time.
+
+    That combination made the suite pass on the author's machine — whose venv also has
+    `requirements-mac.txt` installed — while CI, which installs only `requirements-dev.txt`,
+    failed all twelve patching tests with `ModuleNotFoundError: No module named 'requests'`.
+    Nothing in the suite noticed, because the failure only appears in an environment nobody
+    ran. This test demands every patched top-level module be importable here too, so adding
+    a patch for a package that dev requirements do not install fails locally instead of in CI.
+    """
+    import importlib
+    import re
+    import sys
+
+    patched = set()
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        for dotted in re.findall(r'monkeypatch\.setattr\(\s*"([\w.]+)"', path.read_text(encoding="utf-8")):
+            if "." in dotted:
+                patched.add(dotted.split(".")[0])
+
+    # `backend` is this project; the stdlib ships with the interpreter.
+    third_party = sorted(patched - sys.stdlib_module_names - {"backend"})
+    assert "requests" in third_party, "the patch scanner stopped finding requests; fix the pattern"
+
+    missing = []
+    for name in third_party:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            missing.append(name)
+
+    assert not missing, (
+        "requirements-dev.txt does not install modules the test suite patches: %s. "
+        "CI installs only requirements-dev.txt, so the suite must pass from a venv built "
+        "from that file alone." % ", ".join(missing)
+    )
+
+
 def test_macos_dmg_workflow_builds_and_publishes_artifact():
     workflow = (ROOT / ".github" / "workflows" / "macos-dmg.yml").read_text(encoding="utf-8")
     for token in [

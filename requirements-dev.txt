@@ -6,3 +6,10 @@ ruff>=0.6,<1
 # client silently falls back to HTTP long-polling and every measurement is
 # pessimistic compared to what the browser actually sees.
 websocket-client>=1.7,<2
+# requirements-core.txt deliberately ships without `requests`: it is only needed
+# by the cloud and translation providers, which turn a missing import into
+# CLOUD_DEPENDENCY_MISSING. The dev environment is different — the provider tests
+# patch `requests.post`/`requests.get` directly, so without it here the suite
+# passes only on a machine that happens to have installed requirements-mac.txt or
+# requirements-cloud.txt, and CI fails with ModuleNotFoundError instead.
+requests>=2.31,<3
