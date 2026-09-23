@@ -169,7 +169,7 @@ latency is `decode time + hop`, not window length.
 
 ```dotenv
 MLX_LIVE_MODE=windowed        # windowed (default) | streaming
-MLX_WINDOW_SECONDS=18.0       # left context; larger = more readable, slower to start
+MLX_WINDOW_SECONDS=18.0       # left context; 18 measured best -- longer is not better
 MLX_HOP_SECONDS=2.0           # how often a caption may update
 ```
 

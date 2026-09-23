@@ -66,7 +66,7 @@ git push origin v0.1.0
 
 ```dotenv
 MLX_LIVE_MODE=windowed        # windowed（默认）| streaming
-MLX_WINDOW_SECONDS=18.0       # 左侧上下文：越大越通顺，但开始更慢
+MLX_WINDOW_SECONDS=18.0       # 左侧上下文；实测 18 最好，加长并不会更通顺
 MLX_HOP_SECONDS=2.0           # 字幕刷新频率
 ```
 
