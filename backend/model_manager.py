@@ -247,18 +247,23 @@ class ModelManager:
             huggingface = importlib.import_module("huggingface_hub")
             if cancel_event.is_set():
                 raise _DownloadCancelled()
+            self._set_state(model_id, progress=0, message="正在获取模型配置")
             huggingface.hf_hub_download(
                 repo_id=model_ref,
                 filename="config.json",
                 cache_dir=str(self._runtime_cache_root),
             )
-            self._set_state(model_id, progress=5, message="正在下载 Parakeet 配置")
+            self._set_state(model_id, progress=5, message="正在下载模型权重")
             if cancel_event.is_set():
                 raise _DownloadCancelled()
+            # Without `tqdm_class` the weight download — gigabytes, minutes — reports
+            # nothing at all, and the UI sits on the 5% set above until the file is
+            # already finished. See _byte_progress_sink.
             weights_path = huggingface.hf_hub_download(
                 repo_id=model_ref,
                 filename="model.safetensors",
                 cache_dir=str(self._runtime_cache_root),
+                tqdm_class=self._byte_progress_sink(model_id),
             )
             if cancel_event.is_set():
                 raise _DownloadCancelled()
@@ -296,6 +301,85 @@ class ModelManager:
     def _set_state(self, model_id: str, **changes: object) -> None:
         with self._lock:
             state = dict(self._states.get(model_id, {}))
+            state.update(changes)
+            self._states[model_id] = state
+
+    def _byte_progress_sink(self, model_id: str):
+        """A `tqdm_class` that mirrors Hugging Face's byte counter into the model state.
+
+        `hf_hub_download` has no callback of its own: the *only* way to hear about an
+        in-progress download is to hand it a progress-bar class. Without one, the weight
+        download — gigabytes, minutes, the single thing a first-run user waits for —
+        publishes nothing, and the UI sat on the 5% marker until the file was already done.
+
+        Two properties of the library shape this class:
+
+        * Byte accounting lives on the instance, not read back from the inherited counter,
+          because `tqdm.update()` returns early when the bar is disabled and leaves `n`
+          frozen at `initial`. A bar that prints nothing must still report.
+        * `disable=True` is forced. Hugging Face only injects `disable` for *its own*
+          subclass; a custom class gets the vanilla default of `False`, which would stream
+          a live terminal bar into stderr — inside the DMG, that is the server log file.
+          The browser renders the progress; this object is only a byte counter wearing a
+          progress bar's signature.
+
+        Returns None when `tqdm` cannot be imported, which keeps the download working the
+        way it did before. A machine without local runtime dependencies is not downloading
+        weights in the first place.
+        """
+        try:
+            from tqdm import tqdm as _Tqdm
+        except ImportError:  # pragma: no cover - exercised in a core-only install
+            return None
+
+        manager = self
+
+        class _StateProgress(_Tqdm):
+            def __init__(self, *args, **kwargs):
+                self._bytes_seen = int(kwargs.get("initial") or 0)
+                self._total_bytes = int(kwargs.get("total") or 0)
+                kwargs["disable"] = True
+                super().__init__(*args, **kwargs)
+                self._publish()
+
+            def update(self, n=1):
+                self._bytes_seen += int(n or 0)
+                self._publish()
+                return super().update(n)
+
+            def _publish(self) -> None:
+                seen = max(0, self._bytes_seen)
+                total = self._total_bytes or int(getattr(self, "total", 0) or 0)
+                if total <= 0:
+                    manager._advance_download_state(model_id, downloaded_bytes=seen)
+                    return
+                # Weights own 5..99%: 5 is the "download started" marker set by the caller,
+                # and 100 belongs to the caller that knows the file verified on disk.
+                manager._advance_download_state(
+                    model_id,
+                    downloaded_bytes=seen,
+                    total_bytes=total,
+                    progress=5 + min(94, int(seen * 94 / total)),
+                )
+
+        return _StateProgress
+
+    def _advance_download_state(self, model_id: str, **changes: object) -> None:
+        """Merge a progress report, never letting it move backwards.
+
+        A Xet-backed download builds one bar for network bytes and one for bytes written to
+        disk, so two instances of the sink report the same model independently and their
+        byte counts differ by buffering. Progress is monotonic while a download runs, so
+        taking the maximum is both the right model and the fix for that flapping.
+        """
+        with self._lock:
+            state = dict(self._states.get(model_id, {}))
+            incoming = changes.get("progress")
+            if incoming is not None and int(incoming) < int(state.get("progress") or 0):
+                changes.pop("progress")
+            incoming_bytes = changes.get("downloaded_bytes")
+            if incoming_bytes is not None and int(incoming_bytes) < int(state.get("downloaded_bytes") or 0):
+                changes.pop("downloaded_bytes")
             state.update(changes)
             self._states[model_id] = state
 

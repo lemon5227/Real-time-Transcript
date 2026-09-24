@@ -13,3 +13,9 @@ websocket-client>=1.7,<2
 # passes only on a machine that happens to have installed requirements-mac.txt or
 # requirements-cloud.txt, and CI fails with ModuleNotFoundError instead.
 requests>=2.31,<3
+# ModelManager hands `huggingface_hub` a tqdm subclass to learn about an in-progress
+# weight download, and the tests assert what that class reports. `huggingface_hub`
+# requires tqdm, so any machine able to download a model already has it — but the
+# suite here is not running the download, it is testing the reporting code, and that
+# code is only covered if tqdm is importable in the test environment.
+tqdm>=4.42.1,<5
