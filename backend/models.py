@@ -51,6 +51,8 @@ class TranscriptSegment:
     end_ms: int
     is_final: bool
     confidence: Optional[float] = None
+    speaker_id: Optional[str] = None
+    speaker_confidence: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -59,9 +61,13 @@ class TranscriptSegment:
             raise ValueError("segment timestamps are invalid")
         if self.confidence is not None and not 0 <= self.confidence <= 1:
             raise ValueError("confidence must be between zero and one")
+        if self.speaker_id is not None and not self.speaker_id:
+            raise ValueError("speaker_id must not be empty")
+        if self.speaker_confidence is not None and not 0 <= self.speaker_confidence <= 1:
+            raise ValueError("speaker confidence must be between zero and one")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "text": self.text,
             "start_ms": self.start_ms,
@@ -69,3 +75,8 @@ class TranscriptSegment:
             "is_final": self.is_final,
             "confidence": self.confidence,
         }
+        if self.speaker_id is not None:
+            payload["speaker_id"] = self.speaker_id
+        if self.speaker_confidence is not None:
+            payload["speaker_confidence"] = self.speaker_confidence
+        return payload
