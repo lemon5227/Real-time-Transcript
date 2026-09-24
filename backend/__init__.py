@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -25,6 +26,31 @@ from .translation import ModelTranslationProvider, TranslationRouter
 socketio = SocketIO(async_mode="threading")
 
 
+def _resolve_bundled_diarizer(config: AppConfig) -> AppConfig:
+    """Use the repository/app-bundle helper when no explicit command is set."""
+    if config.diarization_command:
+        return config
+    helper = (
+        Path(__file__).resolve().parent.parent
+        / "native"
+        / "echonote-nemotron-diarizer"
+    )
+    if not helper.is_file() or not helper.stat().st_mode & 0o111:
+        helper = (
+            Path(__file__).resolve().parent.parent
+            / "native"
+            / "nemotron-diarizer"
+            / ".build"
+            / "out"
+            / "Products"
+            / "Release"
+            / "echonote-nemotron-diarizer"
+        )
+    if helper.is_file() and helper.stat().st_mode & 0o111:
+        return replace(config, diarization_command=str(helper))
+    return config
+
+
 def create_app(
     environ: Optional[Mapping[str, str]] = None,
     *,
@@ -35,6 +61,8 @@ def create_app(
     """Create a lightweight Flask app without importing model runtimes."""
     configure_logging()
     app_config = config or load_config(environ)
+    if config is None and environ is None:
+        app_config = _resolve_bundled_diarizer(app_config)
     app = Flask(
         __name__,
         template_folder=str(Path(__file__).resolve().parent.parent / "templates"),
