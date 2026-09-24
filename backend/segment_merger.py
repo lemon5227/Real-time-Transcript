@@ -174,6 +174,14 @@ class SegmentMerger:
     def all_segments(self) -> List[TranscriptSegment]:
         return list(self._segments)
 
+    def replace_segment(self, segment: TranscriptSegment) -> bool:
+        """Replace one stored caption without creating a second history row."""
+        for index, current in enumerate(self._segments):
+            if current.id == segment.id:
+                self._segments[index] = segment
+                return True
+        return False
+
     def _compact(self, emitted: List[TranscriptSegment], removed: List[str]) -> None:
         """Merge stored captions that grew into each other.
 

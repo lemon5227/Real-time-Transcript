@@ -83,6 +83,10 @@ class AppConfig:
     mlx_live_mode: str
     mlx_window_seconds: float
     mlx_hop_seconds: float
+    diarization_enabled: bool
+    diarization_command: str
+    diarization_variant: str
+    diarization_queue: int
 
     @property
     def streaming_confirmation_lag_seconds(self) -> float:
@@ -169,6 +173,12 @@ class AppConfig:
                     "hop_seconds": self.mlx_hop_seconds,
                     "confirmation_lag_seconds": self.live_confirmation_lag_seconds,
                 },
+            },
+            "diarization": {
+                "enabled": self.diarization_enabled,
+                "configured": bool(self.diarization_command),
+                "variant": self.diarization_variant,
+                "queue": self.diarization_queue,
             },
             "translation": {
                 "google": {
@@ -321,5 +331,13 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
         ),
         mlx_hop_seconds=_parse_float(
             source.get("MLX_HOP_SECONDS", "2.0"), "MLX_HOP_SECONDS", 0.1
+        ),
+        diarization_enabled=_parse_bool(
+            source.get("DIARIZATION_ENABLED", "true"), "DIARIZATION_ENABLED"
+        ),
+        diarization_command=source.get("DIARIZATION_COMMAND", "").strip(),
+        diarization_variant=source.get("DIARIZATION_VARIANT", "fast").strip() or "fast",
+        diarization_queue=_parse_int(
+            source.get("DIARIZATION_QUEUE", "16"), "DIARIZATION_QUEUE", 1
         ),
     )

@@ -21,6 +21,9 @@ class SessionConfig:
     stop_timeout_seconds: float = 5.0
     silence_rms_threshold: float = DEFAULT_SILENCE_RMS
     glossary: Tuple[str, ...] = ()
+    enable_diarization: bool = False
+    diarization_variant: str = "fast"
+    diarization_queue: int = 16
 
     def __post_init__(self) -> None:
         if self.mode not in SUPPORTED_MODES:
@@ -37,6 +40,10 @@ class SessionConfig:
             raise ValueError("max_queue must be positive")
         if self.stop_timeout_seconds <= 0:
             raise ValueError("stop_timeout_seconds must be positive")
+        if not self.diarization_variant or len(self.diarization_variant) > 32:
+            raise ValueError("diarization_variant must be a non-empty short name")
+        if self.diarization_queue < 1:
+            raise ValueError("diarization_queue must be positive")
         object.__setattr__(
             self, "silence_rms_threshold", normalize_threshold(self.silence_rms_threshold)
         )

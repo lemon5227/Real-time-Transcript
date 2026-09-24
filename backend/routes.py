@@ -147,6 +147,7 @@ def register_routes(app: Flask, config: AppConfig) -> None:
                 },
             },
             "translation": config.public_dict()["translation"],
+            "diarization": config.public_dict()["diarization"],
         })
 
     @app.post("/api/translate")
@@ -305,6 +306,13 @@ def register_socket_handlers(socketio: SocketIO) -> None:
                 max_queue=config.audio_max_queue,
                 silence_rms_threshold=config.audio_vad_threshold,
                 glossary=payload.get("glossary") or config.audio_glossary,
+                enable_diarization=bool(
+                    payload.get("enable_diarization", config.diarization_enabled)
+                ),
+                diarization_variant=str(
+                    payload.get("diarization_variant") or config.diarization_variant
+                ),
+                diarization_queue=config.diarization_queue,
             )
             result = manager.start(flask_request.sid, session_config)
         except (ProviderError, ValueError, TypeError) as exc:

@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from backend.diarization import SpeakerTurn
 from backend.models import SessionConfig, TranscriptSegment
 from backend.providers.base import ProviderError
 from backend.session_manager import AdaptiveStreamingChunkPolicy, SessionManager
@@ -592,3 +593,77 @@ def test_a_retracted_caption_is_announced_to_the_client():
     assert [item["id"] for item in captions] == ["a", "b", "b"]
     assert [item["id"] for item in result["segments"]] == ["b"]
     assert result["removed_segments"] == 1
+
+
+def test_speaker_worker_does_not_block_asr_and_later_updates_same_caption():
+    release_diarizer = threading.Event()
+    diarizer_started = threading.Event()
+
+    class ImmediateProvider(FakeProvider):
+        requires_contiguous_audio = True
+
+        def push(self, _audio):
+            return [TranscriptSegment("caption-1", "lecture", 0, 200, True)]
+
+    class SlowDiarizer:
+        name = "fake-diarizer"
+
+        def start(self, sample_rate, variant="fast"):
+            assert sample_rate == 16000
+            assert variant == "fast"
+
+        def push(self, _audio, start_ms):
+            diarizer_started.set()
+            assert release_diarizer.wait(timeout=2)
+            return [SpeakerTurn("speaker_0", start_ms, start_ms + 250, 0.9)]
+
+        def flush(self):
+            return []
+
+        def close(self):
+            return None
+
+    emitted = []
+    manager = SessionManager(
+        provider_factory=lambda _config: ImmediateProvider(),
+        diarizer_factory=lambda _config: SlowDiarizer(),
+        emit=lambda _sid, event, payload: emitted.append((event, payload)),
+        streaming_chunk_seconds=0.2,
+    )
+    config = SessionConfig(
+        "local",
+        "fake",
+        "en",
+        16000,
+        window_seconds=0.2,
+        overlap_seconds=0.0,
+        enable_diarization=True,
+    )
+    manager.start("sid-1", config)
+    manager.push_audio("sid-1", _speech(3200), 16000, sequence=1, offset_ms=0)
+
+    deadline = time.monotonic() + 2
+    while not any(event == "transcript_segment" for event, _ in emitted) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert any(event == "transcript_segment" for event, _ in emitted)
+    assert diarizer_started.wait(timeout=1)
+
+    release_diarizer.set()
+    deadline = time.monotonic() + 2
+    while not any(event == "transcript_segment_updated" for event, _ in emitted) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    manager.stop("sid-1")
+
+    updates = [payload for event, payload in emitted if event == "transcript_segment_updated"]
+    assert updates == [
+        {
+            "id": "caption-1",
+            "text": "lecture",
+            "start_ms": 0,
+            "end_ms": 200,
+            "is_final": True,
+            "confidence": None,
+            "speaker_id": "speaker_0",
+            "speaker_confidence": 0.9,
+        }
+    ]

@@ -8,10 +8,12 @@ from typing import Callable, Dict, List, Optional, Set, Union
 import numpy as np
 
 from .audio_pipeline import AudioWindow, AudioWindowBuffer, decode_pcm16_base64
+from .diarization import SpeakerTimeline
 from .glossary import Glossary
 from .logging_setup import get_logger
 from .models import SessionConfig, TranscriptSegment
 from .providers.base import ProviderError, TranscriptionProvider
+from .providers.diarization import NullSpeakerDiarizer, SpeakerDiarizer
 from .segment_merger import SegmentMerger
 from .timeline import CaptureTimeline
 from .voice_gate import VoiceGate
@@ -19,6 +21,7 @@ from .voice_gate import VoiceGate
 logger = get_logger("session")
 
 ProviderFactoryType = Union[Callable[[SessionConfig], TranscriptionProvider], object]
+DiarizerFactoryType = Callable[[SessionConfig], SpeakerDiarizer]
 EmitCallback = Callable[[str, str, Dict[str, object]], None]
 
 # A session that spends longer decoding than the audio it receives is losing
@@ -60,6 +63,7 @@ class _QueuedAudio:
     audio: np.ndarray
     sample_rate: int
     sequence: int
+    recording_start_ms: int = 0
 
 
 @dataclass
@@ -68,12 +72,15 @@ class _SessionState:
     session_id: str
     config: SessionConfig
     provider: TranscriptionProvider
+    diarizer: SpeakerDiarizer
     audio_buffer: Optional[AudioWindowBuffer]
     merger: SegmentMerger
     audio_queue: queue.Queue
+    diarization_queue: queue.Queue
     stop_event: threading.Event = field(default_factory=threading.Event)
     finished_event: threading.Event = field(default_factory=threading.Event)
     worker: Optional[threading.Thread] = None
+    diarization_worker: Optional[threading.Thread] = None
     startup_event: threading.Event = field(default_factory=threading.Event)
     startup_error: Optional[Exception] = None
     startup_deadline: float = 0.0
@@ -88,6 +95,8 @@ class _SessionState:
     slow_decode_logged_at: Optional[float] = None
     emitted_segment_ids: Set[str] = field(default_factory=set)
     removed_segment_count: int = 0
+    speaker_timeline: SpeakerTimeline = field(default_factory=SpeakerTimeline)
+    capture_audio_ms: int = 0
 
 
 class SessionManager:
@@ -98,6 +107,7 @@ class SessionManager:
         max_payload_bytes: int = 2_000_000,
         startup_timeout_seconds: float = 45.0,
         streaming_chunk_seconds: float = 1.0,
+        diarizer_factory: Optional[DiarizerFactoryType] = None,
     ):
         if startup_timeout_seconds <= 0:
             raise ValueError("startup_timeout_seconds must be positive")
@@ -108,6 +118,7 @@ class SessionManager:
         self._max_payload_bytes = max_payload_bytes
         self._startup_timeout_seconds = startup_timeout_seconds
         self._streaming_chunk_seconds = streaming_chunk_seconds
+        self._diarizer_factory = diarizer_factory or (lambda _config: NullSpeakerDiarizer())
         self._sessions: Dict[str, _SessionState] = {}
         # Sessions that were asked to stop but whose worker is still winding
         # down, usually because the model was still loading. Kept so a fast
@@ -131,15 +142,18 @@ class SessionManager:
             if sid in self._sessions:
                 raise ValueError("SESSION_ALREADY_ACTIVE: this connection already has a session")
             provider = self._make_provider(config)
+            diarizer = self._make_diarizer(config)
             state = _SessionState(
                 sid=sid,
                 session_id="session-" + uuid.uuid4().hex,
                 startup_deadline=time.monotonic() + self._startup_timeout_seconds,
                 config=config,
                 provider=provider,
+                diarizer=diarizer,
                 audio_buffer=None,
                 merger=SegmentMerger(),
                 audio_queue=queue.Queue(maxsize=config.max_queue),
+                diarization_queue=queue.Queue(maxsize=config.diarization_queue),
             )
             state.worker = threading.Thread(
                 target=self._run_worker,
@@ -149,6 +163,14 @@ class SessionManager:
             )
             self._sessions[sid] = state
         state.worker.start()
+        if config.enable_diarization:
+            state.diarization_worker = threading.Thread(
+                target=self._run_diarization_worker,
+                args=(state,),
+                name="diarization-%s" % sid[:8],
+                daemon=True,
+            )
+            state.diarization_worker.start()
         logger.info(
             "会话开始 sid=%s session=%s mode=%s model=%s language=%s "
             "sample_rate=%s vad=%s window=%.2fs overlap=%.2fs",
@@ -168,6 +190,11 @@ class SessionManager:
             "session_id": state.session_id,
             "provider": getattr(provider, "name", "unknown"),
             "model": getattr(provider, "model", None),
+            "diarization": {
+                "enabled": config.enable_diarization,
+                "variant": config.diarization_variant,
+                "provider": getattr(diarizer, "name", "disabled"),
+            },
         }
 
     def push_audio(
@@ -195,9 +222,20 @@ class SessionManager:
         )
         if audio.size == 0:
             return False
+        with self._lock:
+            # The browser offset is the recording clock. It is more reliable
+            # than the ASR queue position when a model starts late or a queue
+            # drops old work under pressure.
+            recording_start_ms = (
+                max(0, int(offset_ms))
+                if offset_ms is not None
+                else state.timeline.origin_ms + state.capture_audio_ms
+            )
+            state.capture_audio_ms += round(audio.size * 1000 / 16000)
+        queued_audio = _QueuedAudio(audio, 16000, sequence, recording_start_ms)
+        dropped = False
         try:
-            state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
-            return False
+            state.audio_queue.put_nowait(queued_audio)
         except queue.Full:
             # Keep the newest audio close to real time when inference is slower
             # than capture. Dropping the oldest pending window is recoverable;
@@ -216,8 +254,25 @@ class SessionManager:
                     dropped_ms / 1000,
                     state.audio_queue.qsize(),
                 )
-            state.audio_queue.put_nowait(_QueuedAudio(audio, 16000, sequence))
-            return True
+            state.audio_queue.put_nowait(queued_audio)
+            dropped = True
+
+        if state.config.enable_diarization:
+            try:
+                state.diarization_queue.put_nowait(queued_audio)
+            except queue.Full:
+                try:
+                    state.diarization_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                state.diarization_queue.put_nowait(queued_audio)
+                dropped = True
+                logger.warning(
+                    "说话人识别落后于录音，跳过旧音频 sid=%s 队列=%d",
+                    sid,
+                    state.diarization_queue.qsize(),
+                )
+        return dropped
 
     def stop(self, sid: str) -> Dict[str, object]:
         with self._lock:
@@ -227,12 +282,19 @@ class SessionManager:
 
         state.stop_event.set()
         self._enqueue_stop(state)
+        self._enqueue_diarization_stop(state)
         if state.worker is not None:
             state.worker.join(timeout=state.config.stop_timeout_seconds)
+        if state.diarization_worker is not None:
+            state.diarization_worker.join(timeout=state.config.stop_timeout_seconds)
         # A worker still alive here is one whose model never finished loading.
         # Reporting success would claim the session closed cleanly when it did
         # not, so the caller is told the shutdown is still in progress.
-        still_closing = state.worker is not None and state.worker.is_alive()
+        still_closing = (
+            state.worker is not None and state.worker.is_alive()
+        ) or (
+            state.diarization_worker is not None and state.diarization_worker.is_alive()
+        )
 
         with self._lock:
             self._sessions.pop(sid, None)
@@ -245,6 +307,10 @@ class SessionManager:
             ),
             "session_id": state.session_id,
             "segments": [segment.to_dict() for segment in state.merger.all_segments()],
+            "diarization": {
+                "enabled": state.config.enable_diarization,
+                "provider": getattr(state.diarizer, "name", "disabled"),
+            },
         }
         if state.voice_gate is not None:
             # Makes the quiet-room saving visible instead of silently counted.
@@ -327,6 +393,9 @@ class SessionManager:
             return factory.create(config)
         return factory(config)  # type: ignore[operator]
 
+    def _make_diarizer(self, config: SessionConfig) -> SpeakerDiarizer:
+        return self._diarizer_factory(config)
+
     @staticmethod
     def _enqueue_stop(state: _SessionState) -> None:
         try:
@@ -337,6 +406,90 @@ class SessionManager:
             except queue.Empty:
                 pass
             state.audio_queue.put_nowait(None)
+
+    @staticmethod
+    def _enqueue_diarization_stop(state: _SessionState) -> None:
+        if state.diarization_worker is None:
+            return
+        try:
+            state.diarization_queue.put_nowait(None)
+        except queue.Full:
+            try:
+                state.diarization_queue.get_nowait()
+            except queue.Empty:
+                pass
+            state.diarization_queue.put_nowait(None)
+
+    def _run_diarization_worker(self, state: _SessionState) -> None:
+        try:
+            state.diarizer.start(16000, state.config.diarization_variant)
+            self._emit(
+                state.sid,
+                "diarization_status",
+                {
+                    "status": "ready",
+                    "provider": getattr(state.diarizer, "name", "unknown"),
+                    "variant": state.config.diarization_variant,
+                },
+            )
+            while True:
+                try:
+                    item = state.diarization_queue.get(timeout=0.2)
+                except queue.Empty:
+                    if state.stop_event.is_set():
+                        break
+                    continue
+                if item is None:
+                    break
+                turns = state.diarizer.push(item.audio, item.recording_start_ms)
+                if turns:
+                    state.speaker_timeline.add_turns(turns)
+                    self._emit_speaker_updates(state)
+            turns = state.diarizer.flush()
+            if turns:
+                state.speaker_timeline.add_turns(turns)
+                self._emit_speaker_updates(state)
+        except ProviderError as exc:
+            logger.warning(
+                "说话人识别不可用 sid=%s code=%s message=%s",
+                state.sid,
+                exc.code,
+                exc.message,
+            )
+            self._emit(
+                state.sid,
+                "diarization_status",
+                {
+                    "status": "unavailable",
+                    "provider": getattr(state.diarizer, "name", "unknown"),
+                    "code": exc.code,
+                    "message": exc.message,
+                },
+            )
+        except Exception as exc:
+            logger.exception("说话人识别工作线程异常 sid=%s", state.sid)
+            self._emit(
+                state.sid,
+                "diarization_status",
+                {
+                    "status": "unavailable",
+                    "provider": getattr(state.diarizer, "name", "unknown"),
+                    "code": "DIARIZATION_WORKER_FAILED",
+                    "message": str(exc),
+                },
+            )
+        finally:
+            try:
+                state.diarizer.close()
+            except Exception:
+                logger.exception("关闭说话人识别组件失败 sid=%s", state.sid)
+
+    def _emit_speaker_updates(self, state: _SessionState) -> None:
+        updates = state.speaker_timeline.updates_for_segments(state.merger.all_segments())
+        for segment in updates:
+            if not state.merger.replace_segment(segment):
+                continue
+            self._emit(state.sid, "transcript_segment_updated", segment.to_dict())
 
     def _run_worker(self, state: _SessionState) -> None:
         try:
@@ -545,16 +698,16 @@ class SessionManager:
             corrected = state.glossary.correct(segment.text)
             if not segment.is_final:
                 continue
-            final_segments.append(
-                TranscriptSegment(
-                    id=segment.id,
-                    text=corrected,
-                    start_ms=start_ms,
-                    end_ms=state.timeline.absolute_ms(segment.end_ms + window_start_ms),
-                    is_final=True,
-                    confidence=segment.confidence,
-                )
+            candidate = TranscriptSegment(
+                id=segment.id,
+                text=corrected,
+                start_ms=start_ms,
+                end_ms=state.timeline.absolute_ms(segment.end_ms + window_start_ms),
+                is_final=True,
+                confidence=segment.confidence,
             )
+            attributed = state.speaker_timeline.updates_for_segments([candidate])
+            final_segments.append(attributed[0] if attributed else candidate)
         outcome = state.merger.add(final_segments)
         for segment_id in outcome.removed_ids:
             # The merger compacted two stored captions into one, so this id no

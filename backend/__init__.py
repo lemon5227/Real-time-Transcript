@@ -13,6 +13,7 @@ from .config import AppConfig, load_config
 from .fine_transcription import FineTranscriptionManager
 from .logging_setup import configure_logging
 from .model_manager import ModelManager
+from .providers.diarization import create_diarizer
 from .providers.factory import ProviderFactory
 from .providers.google_translation import GoogleTranslationProvider
 from .providers.microsoft_translation import MicrosoftTranslationProvider
@@ -52,6 +53,11 @@ def create_app(
         emit=lambda sid, event, payload: socketio.emit(event, payload, to=sid),
         startup_timeout_seconds=app_config.audio_startup_timeout_seconds,
         streaming_chunk_seconds=app_config.streaming_chunk_seconds,
+        diarizer_factory=lambda session_config: create_diarizer(
+            app_config.diarization_command,
+            enabled=session_config.enable_diarization and app_config.diarization_enabled,
+            variant=session_config.diarization_variant,
+        ),
     )
     model_cache = getattr(resolved_provider_factory, "mlx_model_cache", None) or MlxModelCache()
     fine_transcription_manager = FineTranscriptionManager(model_cache=model_cache)
