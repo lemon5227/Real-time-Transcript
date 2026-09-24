@@ -87,3 +87,8 @@ htmlcov/
 
 # Runtime log directory (the files themselves are covered by *.log above)
 logs/
+
+# Swift Package Manager build trees (native/ diarizer). Vendored checkouts
+# carry third-party Python; linting them fails CI on code we do not own.
+native/*/.build/
+.build/
