@@ -248,7 +248,7 @@ def test_live_workbench_keeps_frequent_controls_in_a_right_rail():
     javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
     stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
 
-    for hook in ["quick-settings", "quick-translation-toggle", "quick-path-field", "quick-rail-toggle", "quick-rail-collapsed-light", "quick-rail-panel-icon", "quick-rail-review", "data-mode=\"auto\"", "data-mode=\"local\"", "data-mode=\"cloud\"", "topbar-listen-control", "start-listening"]:
+    for hook in ["quick-settings", "quick-translation-toggle", "quick-path-field", "quick-rail-toggle", "quick-rail-collapsed-light", "quick-rail-panel-icon", "quick-rail-review", "quick-rail-diarization", "data-mode=\"auto\"", "data-mode=\"local\"", "data-mode=\"cloud\"", "topbar-listen-control", "start-listening"]:
         assert hook in html
     for hook in ["setupQuickSettings", "syncQuickSettings", "setupQuickRail", "querySelectorAll(\".quick-rail-status-light\")", "quick-settings-collapsed", "quick-translation-toggle", "if (openButton) openButton.addEventListener", "if (closeButton) closeButton.addEventListener", "if (modelManagementList) modelManagementList.addEventListener"]:
         assert hook in javascript

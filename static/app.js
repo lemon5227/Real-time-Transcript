@@ -79,6 +79,7 @@
     translationTarget: "zh",
     translationModelMode: "auto",
     translationNotice: "",
+    diarizationStatus: "idle",
     pendingModelId: null,
     transcriptionReady: false,
     transcriptionFailed: false,
@@ -303,9 +304,24 @@
     var quickAudio = $("#quick-rail-audio");
     var quickSession = $("#quick-rail-session-state");
     var quickStatusLight = $("#quick-rail-status-light");
+    var quickDiarization = $("#quick-rail-diarization");
     if (quickModel) quickModel.textContent = model ? model.label : "等待模型信息";
     if (quickRuntime) quickRuntime.textContent = state.mode === "cloud" ? "云端模型" : runtimeCopy(localRuntime());
     if (quickAudio) quickAudio.textContent = state.saveAudio ? "仅保存在本机" : "仅保存字幕";
+    if (quickDiarization) {
+      var diarizationCapability = state.capabilities && state.capabilities.diarization;
+      var diarizationLabel = !diarizationCapability || !diarizationCapability.enabled
+        ? "说话人已关闭"
+        : !diarizationCapability.configured
+          ? "说话人未安装"
+          : state.diarizationStatus === "ready"
+            ? "说话人已就绪"
+            : state.diarizationStatus === "unavailable"
+              ? "说话人不可用"
+              : "说话人待启动";
+      quickDiarization.textContent = diarizationLabel;
+      quickDiarization.dataset.status = state.diarizationStatus;
+    }
     var statusKind = "idle";
     var sessionCopy = "等待连接";
     if (state.phase === "capturing") {
@@ -1825,7 +1841,10 @@
       removeSegment(payload && (payload.id || payload.segment_id));
     });
     state.socket.on("diarization_status", function (status) {
-      if (!status || !state.recording) return;
+      if (!status) return;
+      state.diarizationStatus = status.status || "idle";
+      syncQuickSettings();
+      if (!state.recording) return;
       if (status.status === "ready") {
         $("#feed-hint").textContent = "说话人识别已就绪 · 原声仍保存在本机";
       } else if (status.status === "unavailable") {
