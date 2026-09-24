@@ -263,6 +263,34 @@ def test_cloud_provider_is_not_called_for_silent_windows(monkeypatch):
     assert len(calls) == 1
 
 
+def test_cloud_provider_reports_missing_requests_as_an_installable_error(monkeypatch):
+    """requirements-core.txt deliberately excludes requests; a core-only install can still
+    pick cloud mode in the UI. The failure must name the fix (requirements-cloud.txt), not
+    surface as a bare ImportError — and push() must be guarded too, since a session that
+    started before the dependency was uninstalled from a shared venv reaches it anyway.
+    """
+    import backend.providers.cloud_transcription as cloud_module
+    from backend.providers.cloud_transcription import CloudTranscriptionProvider
+
+    monkeypatch.setattr(cloud_module, "requests", None)
+    provider = CloudTranscriptionProvider(
+        base_url="https://example.test/v1",
+        api_key="secret-value",
+        model="transcribe-test",
+    )
+
+    with pytest.raises(ProviderError) as start_error:
+        provider.start(SessionConfig("cloud", None, "en", 16000))
+    assert start_error.value.code == "CLOUD_DEPENDENCY_MISSING"
+    assert "requirements-cloud.txt" in start_error.value.action
+
+    # Even if start were bypassed, push must refuse the same way.
+    provider._config = SessionConfig("cloud", None, "en", 16000)
+    with pytest.raises(ProviderError) as push_error:
+        provider.push(np.zeros(16000, dtype=np.float32))
+    assert push_error.value.code == "CLOUD_DEPENDENCY_MISSING"
+
+
 def test_auto_provider_falls_back_when_local_model_cannot_start():
     class FailingLocal:
         name = "local"

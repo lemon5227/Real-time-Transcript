@@ -78,7 +78,6 @@ def test_every_module_the_suite_patches_is_installed_for_development():
     """
     import importlib
     import re
-    import sys
 
     patched = set()
     for path in sorted((ROOT / "tests").glob("test_*.py")):
@@ -86,8 +85,10 @@ def test_every_module_the_suite_patches_is_installed_for_development():
             if "." in dotted:
                 patched.add(dotted.split(".")[0])
 
-    # `backend` is this project; the stdlib ships with the interpreter.
-    third_party = sorted(patched - sys.stdlib_module_names - {"backend"})
+    # `backend` is this project; the standard library ships with the interpreter and
+    # always imports, so filtering stdlib names out would only rename the survivors —
+    # and sys.stdlib_module_names does not exist on Python 3.9, which README claims.
+    third_party = sorted(patched - {"backend"})
     assert "requests" in third_party, "the patch scanner stopped finding requests; fix the pattern"
 
     missing = []
@@ -113,7 +114,7 @@ def test_macos_dmg_workflow_builds_and_publishes_artifact():
         "brew install librsvg",
         "bash scripts/build-macos-dmg.sh",
         "hdiutil imageinfo",
-        "actions/upload-artifact@v4",
+        "actions/upload-artifact@v6",
         "shiju-macos-dmg",
         "拾句-macOS.dmg",
         "contents: write",

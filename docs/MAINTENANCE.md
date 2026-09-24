@@ -219,6 +219,13 @@ These have each cost real time. They are properties of this machine, not of the 
     our code; `.gitignore` excludes it so it is neither linted nor committed. If lint errors
     appear under `native/`, that is a stray build tree, not a regression in our code.
 
+12. **`caplog` cannot see this project's logs.** `configure_logging()` sets
+    `propagate = False` on the `realtime_transcript` logger, and pytest's `caplog` captures
+    at the root — so a `caplog`-based logging assertion passes when the test file runs
+    alone and fails in full-suite order once any earlier test built the Flask app. Attach a
+    `logging.Handler` to `logging.getLogger("realtime_transcript")` instead (see
+    `test_runtime_download_failure_logs_the_traceback_not_just_the_user_message`).
+
 ## Sharp edges worth knowing before you edit
 
 - **Streaming token timestamps are relative to the current sliding mel window**, not to the

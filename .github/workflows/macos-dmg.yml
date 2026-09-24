@@ -52,7 +52,7 @@ jobs:
           hdiutil imageinfo "$OUTPUT_DIR/拾句-macOS.dmg"
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shiju-macos-dmg
           path: dist/拾句-macOS.dmg

@@ -390,3 +390,56 @@ def test_advance_download_state_never_moves_progress_backwards():
     # Non-progress fields still update normally.
     manager._advance_download_state("parakeet", message="正在校验文件")
     assert manager.get_model("parakeet")["message"] == "正在校验文件"
+
+
+def test_runtime_download_failure_logs_the_traceback_not_just_the_user_message(tmp_path, monkeypatch):
+    """The browser shows "check your network"; the server log has to say what actually broke.
+
+    The worker's blanket `except Exception` turns anything — a wiring bug, an import
+    failure, a disk error — into that one message. Before this, nothing reached the log,
+    so a DMG user reporting "download fails" left no evidence to diagnose.
+
+    Collects via a handler on `realtime_transcript` rather than `caplog`: the project's
+    logging_setup sets `propagate=False` on that logger, so root-handler capture is
+    order-dependent on whether another test built the app first.
+    """
+    import logging
+
+    def exploding_download(**_kwargs):
+        raise ValueError("hidden wiring bug")
+
+    fake_huggingface = SimpleNamespace(
+        hf_hub_download=exploding_download,
+        try_to_load_from_cache=lambda *_a, **_k: None,
+    )
+    original_import = __import__("backend.model_manager", fromlist=["importlib"]).importlib.import_module
+    monkeypatch.setattr(
+        "backend.model_manager.importlib.import_module",
+        lambda name: fake_huggingface if name == "huggingface_hub" else original_import(name),
+    )
+    manager = ModelManager(
+        ({"id": "parakeet", "label": "Parakeet", "runtime": "mlx", "model_ref": "mlx-community/p"},),
+        dependency_checker=lambda _model: True,
+        runtime_cache_root=tmp_path,
+    )
+
+    records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    project_logger = logging.getLogger("realtime_transcript")
+    handler = _Collect()
+    project_logger.addHandler(handler)
+    try:
+        manager._download_runtime_model("parakeet", threading.Event())
+    finally:
+        project_logger.removeHandler(handler)
+
+    model = manager.get_model("parakeet")
+    assert model["status"] == "failed"
+    assert model["error"] == "hidden wiring bug"
+    logged = "\n".join(records)
+    assert "ValueError" in logged
+    assert "Traceback" in logged, "the log kept the message but lost the stack"

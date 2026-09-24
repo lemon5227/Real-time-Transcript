@@ -7,10 +7,15 @@ import importlib
 import os
 import threading
 import time
+import traceback
 import urllib.request
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Mapping, Optional
 from urllib.parse import urlparse
+
+from .logging_setup import get_logger
+
+logger = get_logger("models")
 
 
 class ModelManager:
@@ -288,6 +293,10 @@ class ModelManager:
                 error=None,
             )
         except Exception as exc:
+            # `str(exc)` is the user-facing line; the log gets the traceback. A
+            # wiring error inside this worker used to surface as "check your
+            # network", sending debugging toward the router for a bug in this file.
+            logger.error("runtime model download failed for %s:\n%s", model_id, traceback.format_exc())
             self._set_state(
                 model_id,
                 status="failed",
@@ -441,6 +450,7 @@ class ModelManager:
             )
         except Exception as exc:
             self._safe_unlink(partial)
+            logger.error("whisper model download failed for %s:\n%s", model_id, traceback.format_exc())
             self._set_state(
                 model_id,
                 status="failed",

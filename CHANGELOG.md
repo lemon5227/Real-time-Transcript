@@ -14,7 +14,7 @@ Related documents:
 
 | | |
 | --- | --- |
-| Tests | **307 passed**, 30 test files — counted in a clean venv built from `requirements-dev.txt` alone (CI's environment, not this machine's `.venv`) |
+| Tests | **309 passed**, 30 test files — counted in a clean venv built from `requirements-dev.txt` alone (CI's environment, not this machine's `.venv`) |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
 | CI | Green since `08dd17b` (2026-09-24). It had **never** passed — see the entry below |
 | Git | `main`, pushed to `origin`. The 2026-09-24 diarization and download-progress work below is in the commits — see `git log` |
@@ -73,6 +73,27 @@ tests the reporting code, so it must be importable without the MLX extras.
 Verified: 4 new tests in `tests/test_model_manager.py` drive the sink through the library's
 real bar protocol; each fails when the fix is mutated away (sink removed, own-tally replaced
 by `self.n`, `disable=True` dropped, backwards-guard flattened).
+
+### Follow-ups landed the same day
+
+* **Download failures now leave evidence.** `_download_runtime_model`'s blanket
+  `except Exception` put only "check your network" on screen and nothing in the log; both
+  download paths now write the traceback via `get_logger("models")`. The test collecting it
+  attaches a handler to `realtime_transcript` directly — `caplog` captures at the *root*,
+  and `configure_logging()` sets `propagate=False`, so a caplog-based test passes alone but
+  fails in full-suite order once any earlier test has built the app.
+* **`CLOUD_DEPENDENCY_MISSING` is covered.** The provider raises it with the fix in its
+  action text (`requirements-cloud.txt`), but no test had ever forced `requests` to `None`.
+  Two guards (`start` and `push`), one test.
+* **`upload-artifact@v4` → `v6`** in `macos-dmg.yml`, matching the earlier `setup-node` bump;
+  `test_deployment_files.py` pins the version, so it moved with the workflow.
+* **The requirements guard test no longer needs Python 3.10.** It filtered stdlib names with
+  `sys.stdlib_module_names`, which does not exist on 3.9 — the version README promises for
+  cloud profiles. Import-checking every patched root is 3.9-safe and does the same job.
+
+`runs-on: macos-14` was deliberately left alone: the image is supported until November, and
+the Swift/CoreML build inside that workflow has never run on GitHub — moving runner images
+could shift the Xcode version under a build nobody has verified end to end.
 
 ## 2026-09-22 — the vocabulary hint did nothing on the Mac path
 
