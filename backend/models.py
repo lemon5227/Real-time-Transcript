@@ -22,7 +22,7 @@ class SessionConfig:
     silence_rms_threshold: float = DEFAULT_SILENCE_RMS
     glossary: Tuple[str, ...] = ()
     enable_diarization: bool = False
-    diarization_variant: str = "fast"
+    diarization_variant: str = "low"
     diarization_queue: int = 16
 
     def __post_init__(self) -> None:

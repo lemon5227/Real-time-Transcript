@@ -336,7 +336,7 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> AppConfig:
             source.get("DIARIZATION_ENABLED", "true"), "DIARIZATION_ENABLED"
         ),
         diarization_command=source.get("DIARIZATION_COMMAND", "").strip(),
-        diarization_variant=source.get("DIARIZATION_VARIANT", "fast").strip() or "fast",
+        diarization_variant=source.get("DIARIZATION_VARIANT", "low").strip() or "low",
         diarization_queue=_parse_int(
             source.get("DIARIZATION_QUEUE", "16"), "DIARIZATION_QUEUE", 1
         ),

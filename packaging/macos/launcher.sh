@@ -43,6 +43,11 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RUNTIME_ROOT/.cache}"
 export HF_HOME="${HF_HOME:-$default_xdg_cache_home/huggingface}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 export WHISPER_CACHE_DIR="${WHISPER_CACHE_DIR:-$RUNTIME_ROOT/.cache/whisper}"
+export NEMOTRON_MODEL_DIR="${NEMOTRON_MODEL_DIR:-$HOME/Library/Application Support/FluidAudio/Models}"
+NEMOTRON_HELPER="$SOURCE_ROOT/native/echonote-nemotron-diarizer"
+if [[ -z "${DIARIZATION_COMMAND:-}" && -x "$NEMOTRON_HELPER" ]]; then
+  export DIARIZATION_COMMAND="$NEMOTRON_HELPER"
+fi
 
 child_pid=""
 keep_child=0

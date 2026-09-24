@@ -266,6 +266,20 @@ def test_live_workbench_keeps_frequent_controls_in_a_right_rail():
     assert ".control-dock" not in html
 
 
+def test_live_transcript_merges_late_speaker_updates_in_place():
+    app = create_app({})
+    javascript = app.test_client().get("/static/app.js").get_data(as_text=True)
+    stylesheet = app.test_client().get("/static/styles.css").get_data(as_text=True)
+
+    for hook in [
+        'transcript_segment_updated',
+        "function updateTranscriptSegment(segment)",
+        "segment-speaker",
+        "speaker_",
+    ]:
+        assert hook in javascript or hook in stylesheet
+
+
 def test_live_workbench_has_scroll_aware_lecture_focus_mode():
     app = create_app({})
     html = app.test_client().get("/").get_data(as_text=True)

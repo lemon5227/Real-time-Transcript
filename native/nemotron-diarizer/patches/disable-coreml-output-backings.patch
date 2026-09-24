@@ -1,0 +1,15 @@
+diff --git a/Sources/FluidAudio/Diarizer/Nemotron3/Nemotron3Models.swift b/Sources/FluidAudio/Diarizer/Nemotron3/Nemotron3Models.swift
+--- a/Sources/FluidAudio/Diarizer/Nemotron3/Nemotron3Models.swift
++++ b/Sources/FluidAudio/Diarizer/Nemotron3/Nemotron3Models.swift
+@@ -102,6 +102,10 @@
+             "speaker_preds_10ms": hiresBacking,
+         ]
+         if let embsBacking { backings["chunk_pre_encode_embs"] = embsBacking }
+-        options.outputBackings = backings
++        // Some macOS ANE runtimes reject the preallocated fp16 output backing
++        // even though the model description accepts the same shape. Let CoreML
++        // allocate compatible outputs; the surrounding autoreleasepool in
++        // FluidAudio keeps long runs bounded.
++        _ = backings
+         self.predictionOptions = options
+     }

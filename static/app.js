@@ -847,6 +847,16 @@
     return String(segment && (segment.id || segment.segment_id) || "");
   }
 
+  function speakerLabel(segment) {
+    var id = String(segment && (segment.speaker_id || segment.speakerId) || "").trim();
+    if (!id) return "";
+    var match = id.match(/(?:speaker|spk)[_-]?(\d+)/i);
+    if (!match) return id;
+    var number = Number(match[1]);
+    if (!Number.isFinite(number) || number < 0) return id;
+    return "说话人 " + (number < 26 ? String.fromCharCode(65 + number) : String(number + 1));
+  }
+
   function normalizedSegmentText(value) {
     return String(value || "").toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/gi, "");
   }
@@ -880,6 +890,13 @@
     meta.textContent = isFinal
       ? Number.isFinite(confidence) && confidence > 0 ? "识别可信度 " + Math.round(confidence * 100) + "%" : "已确认字幕"
       : "正在识别 · 会自动更新";
+    var speaker = speakerLabel(segment);
+    if (speaker) {
+      var speakerNode = document.createElement("span");
+      speakerNode.className = "segment-speaker";
+      speakerNode.textContent = speaker;
+      meta.appendChild(speakerNode);
+    }
     content.appendChild(text);
     content.appendChild(meta);
     article.appendChild(time);
@@ -1021,6 +1038,29 @@
     }
     scheduleSessionSave();
     enqueueTranslation(segment);
+  }
+
+  function updateTranscriptSegment(segment) {
+    if (!segment || !segmentKey(segment) || !segment.text) return;
+    var id = segmentKey(segment);
+    var stored = findSegment(id);
+    if (!stored) {
+      // A delayed diarization result can race the initial caption event during
+      // startup. Treat it as a normal caption instead of losing the update.
+      addSegment(segment);
+      return;
+    }
+    Object.keys(segment).forEach(function (key) {
+      if (key !== "translations") stored[key] = segment[key];
+    });
+    var article = findFinalArticle(id);
+    if (article) {
+      renderTranscriptArticle(article, stored, true);
+    } else if (state.liveArticle && state.liveArticle.dataset.segmentId === id) {
+      state.liveSegment = Object.assign({}, state.liveSegment || {}, segment);
+      renderTranscriptArticle(state.liveArticle, state.liveSegment, false);
+    }
+    scheduleSessionSave();
   }
 
   function segmentTranslation(segment) {
@@ -1780,8 +1820,17 @@
       else syncQuickSettings();
     });
     state.socket.on("transcript_segment", addSegment);
+    state.socket.on("transcript_segment_updated", updateTranscriptSegment);
     state.socket.on("transcript_segment_removed", function (payload) {
       removeSegment(payload && (payload.id || payload.segment_id));
+    });
+    state.socket.on("diarization_status", function (status) {
+      if (!status || !state.recording) return;
+      if (status.status === "ready") {
+        $("#feed-hint").textContent = "说话人识别已就绪 · 原声仍保存在本机";
+      } else if (status.status === "unavailable") {
+        $("#feed-hint").textContent = "说话人识别暂不可用 · 转录仍会继续";
+      }
     });
     state.socket.on("translation_result", applyTranslationResult);
     state.socket.on("translation_error", function (error) { setTranslationStatus("翻译失败 · 原文仍然可用", true); });

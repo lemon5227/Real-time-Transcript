@@ -22,7 +22,7 @@ Command = Union[str, Sequence[str]]
 class SpeakerDiarizer(Protocol):
     name: str
 
-    def start(self, sample_rate: int, variant: str = "fast") -> None:
+    def start(self, sample_rate: int, variant: str = "low") -> None:
         ...
 
     def push(self, audio: np.ndarray, start_ms: int) -> List[SpeakerTurn]:
@@ -38,7 +38,7 @@ class SpeakerDiarizer(Protocol):
 class NullSpeakerDiarizer:
     name = "disabled"
 
-    def start(self, sample_rate: int, variant: str = "fast") -> None:
+    def start(self, sample_rate: int, variant: str = "low") -> None:
         del sample_rate, variant
 
     def push(self, audio: np.ndarray, start_ms: int) -> List[SpeakerTurn]:
@@ -62,7 +62,7 @@ class JsonlNemotronDiarizer:
         self,
         command: Command,
         *,
-        variant: str = "fast",
+        variant: str = "low",
         request_timeout_seconds: float = 12.0,
     ) -> None:
         self._command = self._normalize_command(command)
@@ -71,7 +71,7 @@ class JsonlNemotronDiarizer:
         self._process: Optional[subprocess.Popen[str]] = None
         self._lock = threading.RLock()
 
-    def start(self, sample_rate: int, variant: str = "fast") -> None:
+    def start(self, sample_rate: int, variant: str = "low") -> None:
         if sample_rate != 16000:
             raise ProviderError(
                 "DIARIZATION_SAMPLE_RATE_UNSUPPORTED",
@@ -288,7 +288,7 @@ def create_diarizer(
     command: Command,
     *,
     enabled: bool,
-    variant: str = "fast",
+    variant: str = "low",
 ) -> SpeakerDiarizer:
     if not enabled or not command:
         return NullSpeakerDiarizer()

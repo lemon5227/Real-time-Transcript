@@ -39,7 +39,7 @@ def helper_command(tmp_path, source=HELPER):
 
 
 def test_jsonl_helper_round_trips_audio_and_speaker_turns(tmp_path):
-    provider = JsonlNemotronDiarizer(helper_command(tmp_path), variant="fast")
+    provider = JsonlNemotronDiarizer(helper_command(tmp_path), variant="low")
 
     provider.start(sample_rate=16000)
     turns = provider.push(np.zeros(1600, dtype=np.float32), start_ms=1200)
@@ -75,7 +75,7 @@ def test_jsonl_helper_reports_early_exit(tmp_path):
 
 
 def test_null_provider_and_disabled_factory_are_safe():
-    provider = create_diarizer("", enabled=False, variant="fast")
+    provider = create_diarizer("", enabled=False, variant="low")
 
     assert isinstance(provider, NullSpeakerDiarizer)
     provider.start(sample_rate=16000)

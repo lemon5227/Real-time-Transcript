@@ -81,6 +81,25 @@ def test_macos_launcher_uses_external_user_runtime_and_bounded_health_check():
     assert ".worktrees" not in source
 
 
+def test_macos_launcher_reuses_fluid_audio_cache_and_bundled_diarizer():
+    source = _svg_text(LAUNCHER_PATH)
+    builder = _svg_text(BUILD_SCRIPT_PATH)
+
+    for token in [
+        "NEMOTRON_MODEL_DIR",
+        "FluidAudio/Models",
+        "DIARIZATION_COMMAND",
+        "echonote-nemotron-diarizer",
+    ]:
+        assert token in source
+    for token in [
+        "native/nemotron-diarizer/build.sh",
+        "echonote-nemotron-diarizer",
+        'cp "$NEMOTRON_BINARY" "$APP_ROOT/native/echonote-nemotron-diarizer"',
+    ]:
+        assert token in builder
+
+
 @pytest.mark.parametrize(
     ("configured_port", "expected_port"),
     [(None, "8765"), ("54321", "54321")],

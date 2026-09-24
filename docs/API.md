@@ -115,6 +115,18 @@ The server emits `transcript_segment` as final segments become available:
 {"id":"local-1","text":"Today we will discuss…","start_ms":0,"end_ms":3000,"is_final":true,"confidence":null}
 ```
 
+When the optional macOS Nemotron diarization helper finishes a nearby audio window, the server
+emits `transcript_segment_updated` with the same segment id. The client must merge this payload
+into the existing row instead of appending a new caption:
+
+```json
+{"id":"local-1","text":"Today we will discuss…","start_ms":0,"end_ms":3000,"is_final":true,"confidence":null,"speaker_id":"speaker_0","speaker_confidence":0.75}
+```
+
+The helper announces its independent lifecycle with `diarization_status`. `ready` means speaker
+labels may arrive later; `unavailable` is non-fatal and leaves transcription and local recording
+running. A diarization failure must never stop the ASR worker.
+
 The same event carries a **revision** of a caption the client already has: the id is unchanged, so the
 client updates that line in place instead of appending a second one. The live path re-decodes a
 window that ends at the live edge, so the newest sentence arrives several times as it grows.

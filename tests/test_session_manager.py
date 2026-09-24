@@ -608,9 +608,9 @@ def test_speaker_worker_does_not_block_asr_and_later_updates_same_caption():
     class SlowDiarizer:
         name = "fake-diarizer"
 
-        def start(self, sample_rate, variant="fast"):
+        def start(self, sample_rate, variant="low"):
             assert sample_rate == 16000
-            assert variant == "fast"
+            assert variant == "low"
 
         def push(self, _audio, start_ms):
             diarizer_started.set()

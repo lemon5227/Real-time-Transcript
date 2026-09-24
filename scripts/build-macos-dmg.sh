@@ -20,6 +20,14 @@ for tool in iconutil hdiutil rsvg-convert rsync; do
   command -v "$tool" >/dev/null 2>&1 || die "missing $tool; install it before building (rsvg-convert is provided by Homebrew librsvg)"
 done
 
+NEMOTRON_BUILDER="$PROJECT_ROOT/native/nemotron-diarizer/build.sh"
+NEMOTRON_BINARY="$PROJECT_ROOT/native/nemotron-diarizer/.build/out/Products/Release/echonote-nemotron-diarizer"
+if [[ ! -x "$NEMOTRON_BINARY" ]]; then
+  [[ -x "$NEMOTRON_BUILDER" ]] || die "missing Nemotron diarizer builder: $NEMOTRON_BUILDER"
+  "$NEMOTRON_BUILDER"
+fi
+[[ -x "$NEMOTRON_BINARY" ]] || die "Nemotron diarizer helper was not built"
+
 if [[ -n "$CODESIGN_IDENTITY" ]] && ! command -v codesign >/dev/null 2>&1; then
   die "CODESIGN_IDENTITY was set but codesign is unavailable"
 fi
@@ -69,6 +77,10 @@ rsync -a \
   "$PROJECT_ROOT/static" \
   "$PROJECT_ROOT/templates" \
   "$APP_ROOT/"
+
+mkdir -p "$APP_ROOT/native"
+cp "$NEMOTRON_BINARY" "$APP_ROOT/native/echonote-nemotron-diarizer"
+chmod 755 "$APP_ROOT/native/echonote-nemotron-diarizer"
 
 cp "$PROJECT_ROOT/packaging/macos/launcher.sh" "$CONTENTS_ROOT/MacOS/RealTimeTranscript"
 chmod 755 "$CONTENTS_ROOT/MacOS/RealTimeTranscript"
