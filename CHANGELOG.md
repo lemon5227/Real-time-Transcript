@@ -10,13 +10,14 @@ Related documents:
 - [`docs/LATENCY.md`](docs/LATENCY.md) — caption latency measurements and tuning knobs.
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — symptoms an operator sees, in plain language.
 
-## Current state — 2026-09-22
+## Current state — 2026-09-24
 
 | | |
 | --- | --- |
-| Tests | **286 passed**, 28 test files |
-| Lint | `ruff check .` clean |
-| Git | `main`, pushed to `origin`. The 2026-09-22 work below is in the commits — see `git log` |
+| Tests | **307 passed**, 30 test files — counted in a clean venv built from `requirements-dev.txt` alone (CI's environment, not this machine's `.venv`) |
+| Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
+| CI | Green since `08dd17b` (2026-09-24). It had **never** passed — see the entry below |
+| Git | `main`, pushed to `origin`. The 2026-09-24 diarization and download-progress work below is in the commits — see `git log` |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
 | Caption latency | Windowed batch decoding: first caption after ~8s, then captions land at the live edge (median ≈0 s), 0.24–0.31× realtime |
 | Long run | 10.6 min soak: **0 of 317** window decodes over the 2 s hop, RSS flat. Needs ~2.3 GB of free memory — swapping puts windows over the hop |
@@ -30,6 +31,48 @@ Quick health check:
 .venv/bin/python -m ruff check .                            # lint
 curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.tool
 ```
+
+## 2026-09-24 — CI had never been green, and the first download sat at 5%
+
+### Fixed: every CI run in the repository's history failed
+The first four runs of `ci.yml` — including the run on the commit that added it — died with
+`ModuleNotFoundError: No module named 'requests'` in 12 tests. CI installs only
+`requirements-dev.txt`, which had no `requests` in it. The local `.venv` has `requests`
+transitively (via `requirements-mac.txt` → `parakeet-mlx`), so `pytest -q` passed on every
+machine that mattered and the gap stayed invisible for the whole life of the workflow.
+
+Fix: `requests>=2.31,<3` added to `requirements-dev.txt`. Guarded against a repeat by
+`test_every_module_the_suite_patches_is_installed_for_development`, which scans the test
+sources for `monkeypatch.setattr("module.attr", ...)` targets and asserts each third-party
+root module imports. It failed exactly as intended when fed the pre-fix requirements. The
+`setup-node@v4` → `v6` bump in the same file cleared the Node 20 deprecation notice.
+
+### Fixed: model download progress was pinned at 5% until the file finished
+The ROADMAP's standing "首次下载期间 UI 进度长时间停在 5%" item. `hf_hub_download` has no
+progress callback — the only in-progress hook is `tqdm_class` — so the worker set the state
+to 5%, blocked for minutes pulling gigabytes, then jumped to 100%. The frontend was never
+the problem: it already polls `/api/models` every 750ms while a download runs.
+
+`ModelManager._byte_progress_sink` now hands Hugging Face a `tqdm` subclass that mirrors
+bytes into the model state (weights own 5..99%; 100 still belongs to the caller that
+verified the file on disk). Three traps shaped it, each pinned by a test:
+
+* A **disabled** tqdm bar returns early from `update()` and never touches `self.n`
+  (verified: `update(50)` left `n=7`). Byte accounting therefore lives on the instance, not
+  the inherited counter.
+* Hugging Face injects `disable` only for *its own* bar subclass — a custom class gets the
+  vanilla default `False`, which would stream live bars into stderr, i.e. the DMG's server
+  log. The sink forces `disable=True`.
+* The Xet-backed path builds **two** bars from the same class (network bytes, then bytes
+  written), so `_advance_download_state` refuses to let progress or byte counts move
+  backwards.
+
+`tqdm>=4.42.1,<5` joins `requirements-dev.txt` — same blind spot as `requests`: the suite
+tests the reporting code, so it must be importable without the MLX extras.
+
+Verified: 4 new tests in `tests/test_model_manager.py` drive the sink through the library's
+real bar protocol; each fails when the fix is mutated away (sink removed, own-tally replaced
+by `self.n`, `disable=True` dropped, backwards-guard flattened).
 
 ## 2026-09-22 — the vocabulary hint did nothing on the Mac path
 

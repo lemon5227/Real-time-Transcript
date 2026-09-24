@@ -199,6 +199,26 @@ These have each cost real time. They are properties of this machine, not of the 
 9. **Do not write "（当前）" or similar markers into `config` comments.** They go stale the moment
    someone changes the value and then actively mislead.
 
+10. **A green local suite says nothing about CI.** The local `.venv` is built from *all* the
+    requirement files, so it carries dependencies CI never installs. CI ran `pytest` against
+    `requirements-dev.txt` alone and failed on every run for its whole life — missing
+    `requests`, later missing `tqdm` — while passing locally every time. To check what CI
+    actually sees, build a throwaway venv from that one file:
+
+    ```bash
+    python3 -m venv /tmp/rtt-civenv && /tmp/rtt-civenv/bin/python -m pip install -r requirements-dev.txt
+    /tmp/rtt-civenv/bin/python -m pytest -q --basetemp=/tmp/rtt-pytest
+    ```
+
+    Every test that patches a third-party module (`monkeypatch.setattr("requests.post", ...)`)
+    needs that module *installed*, not merely present on this machine.
+    `tests/test_deployment_files.py` now scans for those patches and checks the venv.
+
+11. **`ruff check .` reaches into vendored trees.** The Swift diarizer's SPM build directory
+    (`native/*/.build/`, ~1,000 files including third-party Python) is a build artifact, not
+    our code; `.gitignore` excludes it so it is neither linted nor committed. If lint errors
+    appear under `native/`, that is a stray build tree, not a regression in our code.
+
 ## Sharp edges worth knowing before you edit
 
 - **Streaming token timestamps are relative to the current sliding mel window**, not to the
