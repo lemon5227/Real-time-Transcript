@@ -21,7 +21,7 @@ for tool in iconutil hdiutil rsvg-convert rsync; do
 done
 
 NEMOTRON_BUILDER="$PROJECT_ROOT/native/nemotron-diarizer/build.sh"
-NEMOTRON_BINARY="$PROJECT_ROOT/native/nemotron-diarizer/.build/out/Products/Release/echonote-nemotron-diarizer"
+NEMOTRON_BINARY="$PROJECT_ROOT/native/nemotron-diarizer/.build/release/echonote-nemotron-diarizer"
 if [[ ! -x "$NEMOTRON_BINARY" ]]; then
   [[ -x "$NEMOTRON_BUILDER" ]] || die "missing Nemotron diarizer builder: $NEMOTRON_BUILDER"
   "$NEMOTRON_BUILDER"
