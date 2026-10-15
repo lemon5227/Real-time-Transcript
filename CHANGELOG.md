@@ -17,7 +17,7 @@ Related documents:
 | Tests | **319 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
 | CI | Green on `f5ee023` (2026-10-15). Three pushes earlier that evening went red on a workflow-contract test still pinning `runs-on: macos-14`; the test now pins `macos-15` and the ASCII asset name |
-| Git | `main`, pushed to `origin` (`f5ee023`); annotated tag `v0.1.0` |
+| Git | `main`, pushed to `origin`; annotated tag `v0.1.0` on `f5ee023` |
 | Releases | `v0.1.0` — the first GitHub Release. Asset `shiju-macOS.dmg` (9.3 MB) from the `macOS DMG` workflow; downloaded, mounted, bundled sources hash-match the repo |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
 | Caption latency | Windowed batch decoding: captions land at the live edge (median ≈0 s), 0.24–0.31× realtime. The first-caption figure (8.3 s) was measured before the 2026-10-15 changes — re-measure with `tools/replay_lecture.py` |
