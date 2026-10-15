@@ -90,6 +90,15 @@ def repeated_phrases(text: str, length: int = 5) -> int:
     return sum(1 for count in counts.values() if count > 1)
 
 
+def is_interim_stop(payload: dict) -> bool:
+    """A timed-out stop is not complete while workers still have final output."""
+    return bool(
+        payload
+        and payload.get("status") == "stopping"
+        and payload.get("awaiting_final_results")
+    )
+
+
 def load_audio(path: str) -> tuple:
     with wave.open(path, "rb") as handle:
         rate = handle.getframerate()
@@ -150,6 +159,8 @@ def main() -> int:
 
     @sio.on("transcription_stopped")
     def _on_stopped(payload):
+        if is_interim_stop(payload):
+            return
         stop_result.update(payload or {})
         finished.set()
 

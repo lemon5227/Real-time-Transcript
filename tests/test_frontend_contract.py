@@ -54,6 +54,14 @@ def test_live_page_exposes_class_readiness_controls():
     assert "preparing" in javascript
 
 
+def test_frontend_waits_for_final_results_before_saving_a_stopping_session():
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+    assert 'result.status === "stopping" && result.awaiting_final_results' in javascript
+    assert 'setAppPhase("stopping", "正在保存课堂"' in javascript
+    assert 'state.translationStopPromise = state.translationQueue ? state.translationQueue.stop()' in javascript
+    assert 'var finalResult = Object.assign({}, result || {}, { segments: state.segments });' in javascript
+
+
 def test_frontend_requests_selected_microphone_and_has_signal_health():
     javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
     assert "deviceId" in javascript

@@ -130,19 +130,21 @@ If a **configured** provider is being ignored, check `TranslationRouter.resolve_
 
 `provider.start()` blocks while the model loads. A stop that arrives during that window has to
 be handled after `start()` returns — look for the early `return` guarded by `stop_event` in
-`session_manager._run_session`. Removing it revives zombie workers that announce
+`session_manager._run_worker`. Removing it revives zombie workers that announce
 `transcription_ready` for a session the client already closed.
 
 Related: `provider.flush()` is called **only** on stop (`session_manager.py`, in the same worker).
 Anything that depends on final output must be triggered there.
 
-### Stop reports success but a segment never appears
+### Stop reports `stopping` before the final caption appears
 
-Because flush happens on the worker thread, `stop()` can return before the tail is emitted. It
-reports `status="stopping"` with a detail when the join times out. If you see "success" but a
-missing final caption, check whether a recent change suppressed post-stop emits — a global
-"don't emit after stop" guard once swallowed the final flush, which is the *legitimate* last few
-seconds of captions. The correct fix targets only zombie workers, not all post-stop emissions.
+Because draining and flush happen on the worker thread, `stop()` can return before the tail is
+emitted. When `awaiting_final_results` is true, `status="stopping"` is an interim acknowledgement;
+the manager emits a second `transcription_stopped` event with the stable final snapshot after the
+transcription and diarization workers finish. The browser must wait for that event before saving.
+Never add a global "don't emit after stop" guard: the final flush can contain legitimate captions.
+Audio admission is closed under the manager lock before stop markers are queued; if a queue is full,
+the worker drains it after `stop_event` instead of dropping accepted speech to make room for a marker.
 
 ### Tests fail with `PermissionError` on `pytest-of-unknown`
 

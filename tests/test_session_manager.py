@@ -380,10 +380,77 @@ def test_stop_admits_the_worker_is_still_loading_the_model():
     result = manager.stop("sid-1")
 
     assert result["status"] == "stopping"
+    assert result["awaiting_final_results"] is False
     assert result["detail"]
     # Once the model finally loads, the dead session must stay silent.
     time.sleep(0.9)
     assert emitted == []
+
+
+def test_stop_drains_a_full_audio_queue_and_emits_the_final_snapshot():
+    """A timed-out stop is interim; accepted queued audio and its final caption survive."""
+    first_push_started = threading.Event()
+    release_first_push = threading.Event()
+    pushed_sizes = []
+    emitted = []
+
+    class SlowFirstPushProvider(FakeProvider):
+        def push(self, audio):
+            pushed_sizes.append(audio.size)
+            if len(pushed_sizes) == 1:
+                first_push_started.set()
+                assert release_first_push.wait(timeout=2)
+                return []
+            return [TranscriptSegment("last", "last words", 0, 200, True)]
+
+    manager = SessionManager(
+        provider_factory=lambda _config: SlowFirstPushProvider(),
+        emit=lambda _sid, event, payload: emitted.append((event, payload)),
+    )
+    config = SessionConfig(
+        "local",
+        "fake",
+        "en",
+        16000,
+        window_seconds=0.2,
+        overlap_seconds=0.0,
+        max_queue=1,
+        stop_timeout_seconds=0.05,
+    )
+    manager.start("sid-1", config)
+    state = manager._sessions["sid-1"]
+    assert state.startup_event.wait(timeout=1)
+
+    manager.push_audio("sid-1", _speech(3200), 16000, 0)
+    assert first_push_started.wait(timeout=1)
+    manager.push_audio("sid-1", _speech(3200), 16000, 1)
+
+    interim = manager.stop("sid-1")
+
+    assert interim["status"] == "stopping"
+    assert interim["awaiting_final_results"] is True
+    assert state.audio_queue.qsize() == 1
+    assert state.timeline.dropped_ms == 0
+
+    release_first_push.set()
+    deadline = time.monotonic() + 2
+    completed = []
+    while time.monotonic() < deadline:
+        completed = [
+            payload
+            for event, payload in emitted
+            if event == "transcription_stopped" and payload.get("status") != "stopping"
+        ]
+        if completed:
+            break
+        time.sleep(0.01)
+
+    assert len(pushed_sizes) == 2
+    assert len(completed) == 1
+    assert [segment["id"] for segment in completed[0]["segments"]] == ["last"]
+    assert [event for event, _payload in emitted].index("transcript_segment") < [
+        event for event, _payload in emitted
+    ].index("transcription_stopped")
 
 
 def test_a_model_that_never_becomes_ready_is_reported_as_a_timeout():

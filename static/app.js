@@ -73,6 +73,7 @@
     audioManifest: null,
     audioStopPromise: null,
     translationStopPromise: null,
+    restoringFinalSnapshot: false,
     translationQueue: null,
     translationMode: "off",
     translationProvider: "microsoft",
@@ -1053,7 +1054,7 @@
       pulseFollowControl();
     }
     scheduleSessionSave();
-    enqueueTranslation(segment);
+    if (!state.restoringFinalSnapshot) enqueueTranslation(segment);
   }
 
   function updateTranscriptSegment(segment) {
@@ -1506,13 +1507,27 @@
     if (!state.finishing || state.finalizing) return;
     state.finalizing = true;
     if (result && result.segments) {
+      var previousSegments = {};
+      state.segments.forEach(function (segment) {
+        previousSegments[String(segment.id || segment.segment_id || "")] = segment;
+      });
       state.segments = [];
       state.liveSegment = null;
       state.liveArticle = null;
       $$(".transcript-segment").forEach(function (node) { node.remove(); });
-      result.segments.forEach(addSegment);
+      state.restoringFinalSnapshot = true;
+      result.segments.forEach(function (segment) {
+        var previous = previousSegments[String(segment.id || segment.segment_id || "")];
+        var restored = Object.assign({}, segment);
+        if (previous && previous.text === segment.text && previous.translations) {
+          restored.translations = previous.translations;
+        }
+        addSegment(restored);
+      });
+      state.restoringFinalSnapshot = false;
     }
-    return persistSession(result || {}, audioManifest).then(function () {
+    var finalResult = Object.assign({}, result || {}, { segments: state.segments });
+    return persistSession(finalResult, audioManifest).then(function () {
       releaseCapture();
       state.audioRecorder = null;
       setRecordingUi(false);
@@ -1537,9 +1552,15 @@
 
   function receiveStopResult(result) {
     if (!state.finishing || state.stopResult) return;
+    if (result && result.status === "stopping" && result.awaiting_final_results) {
+      setAppPhase("stopping", "正在保存课堂", "正在处理最后的音频和字幕");
+      return;
+    }
     state.stopResult = result || {};
     if (!state.audioStopPromise) state.audioStopPromise = Promise.resolve(null);
-    if (!state.translationStopPromise) state.translationStopPromise = Promise.resolve();
+    if (!state.translationStopPromise) {
+      state.translationStopPromise = state.translationQueue ? state.translationQueue.stop() : Promise.resolve();
+    }
     Promise.all([state.audioStopPromise, state.translationStopPromise]).then(function (values) {
       var audioManifest = values[0];
       return completeSession(state.stopResult, audioManifest);
@@ -1648,7 +1669,7 @@
     state.finishing = true;
     state.finalizing = false;
     state.stopResult = null;
-    state.translationStopPromise = state.translationQueue ? state.translationQueue.stop() : Promise.resolve();
+    state.translationStopPromise = null;
     setAppPhase("stopping", "正在保存课堂", "正在处理最后一小段音频");
     flushPendingAudio();
     state.audioStopPromise = state.audioRecorder ? state.audioRecorder.stop().catch(function (caught) {

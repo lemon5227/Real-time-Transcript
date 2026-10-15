@@ -79,6 +79,7 @@ class _SessionState:
     diarization_queue: queue.Queue
     stop_event: threading.Event = field(default_factory=threading.Event)
     finished_event: threading.Event = field(default_factory=threading.Event)
+    accepting_audio: bool = True
     worker: Optional[threading.Thread] = None
     diarization_worker: Optional[threading.Thread] = None
     startup_event: threading.Event = field(default_factory=threading.Event)
@@ -207,89 +208,96 @@ class SessionManager:
     ) -> bool:
         with self._lock:
             state = self._sessions.get(sid)
-            if state is None:
+            if state is None or not state.accepting_audio:
                 raise ValueError("SESSION_NOT_ACTIVE: no active transcription session")
-            if sequence <= state.last_sequence:
-                raise ValueError("INVALID_AUDIO_SEQUENCE: sequence must increase")
-            state.last_sequence = sequence
-            state.timeline.observe(offset_ms)
-
-        self._check_startup_timeout(state)
         audio = decode_pcm16_base64(
             encoded_audio,
             sample_rate=sample_rate,
             max_bytes=self._max_payload_bytes,
         )
-        if audio.size == 0:
-            return False
-        with self._lock:
-            # The browser offset is the recording clock. It is more reliable
-            # than the ASR queue position when a model starts late or a queue
-            # drops old work under pressure.
-            recording_start_ms = (
-                max(0, int(offset_ms))
-                if offset_ms is not None
-                else state.timeline.origin_ms + state.capture_audio_ms
-            )
-            state.capture_audio_ms += round(audio.size * 1000 / 16000)
-        queued_audio = _QueuedAudio(audio, 16000, sequence, recording_start_ms)
-        dropped = False
-        try:
-            state.audio_queue.put_nowait(queued_audio)
-        except queue.Full:
-            # Keep the newest audio close to real time when inference is slower
-            # than capture. Dropping the oldest pending window is recoverable;
-            # turning it into a session-fatal error is not. The dropped audio is
-            # still part of the recording, so the timeline keeps its duration.
-            try:
-                discarded = state.audio_queue.get_nowait()
-            except queue.Empty:
-                discarded = None
-            if isinstance(discarded, _QueuedAudio):
-                dropped_ms = round(discarded.audio.size * 1000 / 16000)
-                state.timeline.mark_dropped(dropped_ms)
-                logger.warning(
-                    "推理落后于录音，丢弃音频 sid=%s 丢弃=%.2fs 队列=%d",
-                    sid,
-                    dropped_ms / 1000,
-                    state.audio_queue.qsize(),
-                )
-            state.audio_queue.put_nowait(queued_audio)
-            dropped = True
 
-        if state.config.enable_diarization:
-            try:
-                state.diarization_queue.put_nowait(queued_audio)
-            except queue.Full:
-                try:
-                    state.diarization_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                state.diarization_queue.put_nowait(queued_audio)
-                dropped = True
-                logger.warning(
-                    "说话人识别落后于录音，跳过旧音频 sid=%s 队列=%d",
-                    sid,
-                    state.diarization_queue.qsize(),
+        # Decoding can take time. Recheck admission while holding the same lock
+        # that stop() uses to close it, so an accepted chunk cannot be queued
+        # behind the stop marker.
+        with self._lock:
+            if self._sessions.get(sid) is not state or not state.accepting_audio:
+                raise ValueError("SESSION_NOT_ACTIVE: no active transcription session")
+            if sequence <= state.last_sequence:
+                raise ValueError("INVALID_AUDIO_SEQUENCE: sequence must increase")
+            state.last_sequence = sequence
+            state.timeline.observe(offset_ms)
+            dropped = False
+            if audio.size > 0:
+                # The browser offset is the recording clock. It is more
+                # reliable than the ASR queue position when a model starts
+                # late or a queue drops old work under pressure.
+                recording_start_ms = (
+                    max(0, int(offset_ms))
+                    if offset_ms is not None
+                    else state.timeline.origin_ms + state.capture_audio_ms
                 )
+                state.capture_audio_ms += round(audio.size * 1000 / 16000)
+                queued_audio = _QueuedAudio(audio, 16000, sequence, recording_start_ms)
+                try:
+                    state.audio_queue.put_nowait(queued_audio)
+                except queue.Full:
+                    # Keep the newest audio close to real time when inference
+                    # is slower than capture. This backpressure policy applies
+                    # only while accepting live audio, never during stop.
+                    try:
+                        discarded = state.audio_queue.get_nowait()
+                    except queue.Empty:
+                        discarded = None
+                    if isinstance(discarded, _QueuedAudio):
+                        dropped_ms = round(discarded.audio.size * 1000 / 16000)
+                        state.timeline.mark_dropped(dropped_ms)
+                        logger.warning(
+                            "推理落后于录音，丢弃音频 sid=%s 丢弃=%.2fs 队列=%d",
+                            sid,
+                            dropped_ms / 1000,
+                            state.audio_queue.qsize(),
+                        )
+                    state.audio_queue.put_nowait(queued_audio)
+                    dropped = True
+
+                if state.config.enable_diarization:
+                    try:
+                        state.diarization_queue.put_nowait(queued_audio)
+                    except queue.Full:
+                        try:
+                            state.diarization_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        state.diarization_queue.put_nowait(queued_audio)
+                        dropped = True
+                        logger.warning(
+                            "说话人识别落后于录音，跳过旧音频 sid=%s 队列=%d",
+                            sid,
+                            state.diarization_queue.qsize(),
+                        )
+        self._check_startup_timeout(state)
         return dropped
 
     def stop(self, sid: str) -> Dict[str, object]:
         with self._lock:
             state = self._sessions.get(sid)
+            if state is not None:
+                # Close admission atomically with enqueueing the stop markers.
+                # Any audio already accepted is ahead of the marker, and an
+                # in-flight request cannot enqueue after it.
+                state.accepting_audio = False
+                state.stop_event.set()
+                self._enqueue_stop(state)
+                self._enqueue_diarization_stop(state)
         if state is None:
             return {"status": "success", "already_stopped": True}
 
-        state.stop_event.set()
-        self._enqueue_stop(state)
-        self._enqueue_diarization_stop(state)
         if state.worker is not None:
             state.worker.join(timeout=state.config.stop_timeout_seconds)
         if state.diarization_worker is not None:
             state.diarization_worker.join(timeout=state.config.stop_timeout_seconds)
-        # A worker still alive here is one whose model never finished loading.
-        # Reporting success would claim the session closed cleanly when it did
-        # not, so the caller is told the shutdown is still in progress.
+        # A worker can still be loading, decoding, flushing, or closing. Do not
+        # report success until the final results have been produced.
         still_closing = (
             state.worker is not None and state.worker.is_alive()
         ) or (
@@ -301,10 +309,23 @@ class SessionManager:
             if still_closing:
                 self._closing[sid] = state
 
+        result = self._build_stop_result(state, still_closing)
+        self._log_stop_result(state, result, interim=still_closing)
+        if still_closing:
+            threading.Thread(
+                target=self._wait_for_close,
+                args=(state, bool(result.get("awaiting_final_results"))),
+                name="transcription-stop-%s" % sid[:8],
+                daemon=True,
+            ).start()
+        return result
+
+    @staticmethod
+    def _build_stop_result(
+        state: _SessionState, still_closing: bool
+    ) -> Dict[str, object]:
         result: Dict[str, object] = {
-            "status": (
-                "stopping" if still_closing else "success" if state.error is None else "error"
-            ),
+            "status": "stopping" if still_closing else "success" if state.error is None else "error",
             "session_id": state.session_id,
             "segments": [segment.to_dict() for segment in state.merger.all_segments()],
             "diarization": {
@@ -318,8 +339,12 @@ class SessionManager:
         if state.error is not None:
             result["error"] = state.error.to_dict()
         if still_closing:
-            result["detail"] = "模型仍在加载，稍后会自动释放"
-        segments = result["segments"]
+            result["awaiting_final_results"] = state.startup_event.is_set()
+            result["detail"] = (
+                "正在完成最后的音频和字幕"
+                if state.startup_event.is_set()
+                else "模型仍在启动，将保存目前已有的结果"
+            )
         if state.audio_seconds_total > 0:
             result["decode_realtime_ratio"] = round(
                 state.decode_seconds_total / state.audio_seconds_total, 3
@@ -329,9 +354,16 @@ class SessionManager:
             # published. Expected occasionally; a large number means the window
             # is producing unstable sentence boundaries.
             result["removed_segments"] = state.removed_segment_count
+        return result
+
+    def _log_stop_result(
+        self, state: _SessionState, result: Dict[str, object], interim: bool
+    ) -> None:
+        segments = result["segments"]
         logger.info(
-            "会话结束 sid=%s session=%s 状态=%s 确认字幕=%d 段 撤回=%d 静音跳过=%.2fs 丢弃=%.2fs 实时倍率=%.2fx",
-            sid,
+            "%s sid=%s session=%s 状态=%s 确认字幕=%d 段 撤回=%d 静音跳过=%.2fs 丢弃=%.2fs 实时倍率=%.2fx",
+            "停止处理中" if interim else "会话结束",
+            state.sid,
             state.session_id,
             result["status"],
             len(segments) if isinstance(segments, list) else 0,
@@ -340,7 +372,22 @@ class SessionManager:
             state.timeline.dropped_ms / 1000,
             result.get("decode_realtime_ratio", 0.0),
         )
-        return result
+
+    def _wait_for_close(self, state: _SessionState, emit_final_result: bool) -> None:
+        # A timeout acknowledgement is not a final transcript. Wait for both
+        # workers to drain and flush before publishing the stable snapshot.
+        if state.worker is not None:
+            state.worker.join()
+        if state.diarization_worker is not None:
+            state.diarization_worker.join()
+        with self._lock:
+            if self._closing.get(state.sid) is state:
+                self._closing.pop(state.sid, None)
+        if not emit_final_result:
+            return
+        result = self._build_stop_result(state, still_closing=False)
+        self._log_stop_result(state, result, interim=False)
+        self._emit(state.sid, "transcription_stopped", result)
 
     def cleanup(self, sid: str) -> None:
         self.stop(sid)
@@ -401,11 +448,9 @@ class SessionManager:
         try:
             state.audio_queue.put_nowait(None)
         except queue.Full:
-            try:
-                state.audio_queue.get_nowait()
-            except queue.Empty:
-                pass
-            state.audio_queue.put_nowait(None)
+            # Preserve accepted speech. With stop_event set, the worker exits
+            # after draining the full queue even when no sentinel fits.
+            return
 
     @staticmethod
     def _enqueue_diarization_stop(state: _SessionState) -> None:
@@ -414,11 +459,9 @@ class SessionManager:
         try:
             state.diarization_queue.put_nowait(None)
         except queue.Full:
-            try:
-                state.diarization_queue.get_nowait()
-            except queue.Empty:
-                pass
-            state.diarization_queue.put_nowait(None)
+            # The diarization worker exits after draining when stop_event is
+            # set, so a full queue needs no sentinel.
+            return
 
     def _run_diarization_worker(self, state: _SessionState) -> None:
         try:
@@ -504,11 +547,6 @@ class SessionManager:
                 getattr(state.provider, "model", None),
                 time.monotonic() - startup_started,
             )
-            if state.stop_event.is_set():
-                # Stopped while the model was still loading. Announcing a ready
-                # session now would revive a session the client already ended.
-                state.startup_event.set()
-                return
             contiguous = bool(
                 getattr(state.provider, "requires_contiguous_audio", False)
             )
@@ -536,7 +574,15 @@ class SessionManager:
                 threshold=state.config.silence_rms_threshold,
             )
             state.glossary = Glossary(state.config.glossary)
-            state.startup_event.set()
+            with self._lock:
+                if state.stop_event.is_set():
+                    # Stopped while the model was still loading. Announcing a
+                    # ready session now would revive one the client already
+                    # ended. stop() uses this lock to decide whether final
+                    # results may still be pending.
+                    state.startup_event.set()
+                    return
+                state.startup_event.set()
             self._emit(
                 state.sid,
                 "transcription_ready",
