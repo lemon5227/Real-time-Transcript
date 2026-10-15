@@ -358,6 +358,62 @@ def test_provisional_segments_are_emitted_but_not_saved_as_history():
     assert [item["id"] for item in result["segments"]] == ["final-1"]
 
 
+def test_a_promoted_draft_is_logged_as_an_update_not_a_second_caption():
+    """The draft already sits on the client's screen under this id.
+
+    When the provider later confirms the same id, the client replaces that row
+    in place, so the log must not read like a new caption appeared -- otherwise
+    a healthy feed looks like the duplicate problem the merger exists to stop.
+    """
+    import logging
+
+    class PromoteProvider(FakeProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def push(self, _audio):
+            self.calls += 1
+            if self.calls == 1:
+                return [TranscriptSegment("live-1", "the sentence so far", 0, 500, False)]
+            return [TranscriptSegment("live-1", "the sentence, confirmed", 0, 900, True)]
+
+    records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    project_logger = logging.getLogger("realtime_transcript")
+    previous_level = project_logger.level
+    handler = _Collect()
+    project_logger.addHandler(handler)
+    project_logger.setLevel(logging.INFO)
+    try:
+        provider = PromoteProvider()
+        manager = SessionManager(provider_factory=lambda _config: provider)
+        config = SessionConfig(
+            "local", "fake", "en", 16000, window_seconds=0.2, overlap_seconds=0.0
+        )
+        manager.start("sid-1", config)
+        manager.push_audio("sid-1", _speech(3200), sample_rate=16000, sequence=1)
+        manager.push_audio("sid-1", _speech(3200), sample_rate=16000, sequence=2)
+
+        deadline = time.monotonic() + 2.0
+        confirmed = []
+        while time.monotonic() < deadline:
+            confirmed = [line for line in records if "确认字幕" in line and "live-1" in line]
+            if confirmed:
+                break
+            time.sleep(0.01)
+        manager.stop("sid-1")
+    finally:
+        project_logger.removeHandler(handler)
+        project_logger.setLevel(previous_level)
+
+    assert len(confirmed) == 1
+    assert "更新" in confirmed[0]
+
+
 def test_stop_admits_the_worker_is_still_loading_the_model():
     """Stopping during model load must not report a clean shutdown.
 

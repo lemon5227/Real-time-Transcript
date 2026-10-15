@@ -10,18 +10,18 @@ Related documents:
 - [`docs/LATENCY.md`](docs/LATENCY.md) — caption latency measurements and tuning knobs.
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — symptoms an operator sees, in plain language.
 
-## Current state — 2026-09-24
+## Current state — 2026-10-15
 
 | | |
 | --- | --- |
-| Tests | **309 passed**, 30 test files — counted in a clean venv built from `requirements-dev.txt` alone (CI's environment, not this machine's `.venv`) |
+| Tests | **319 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `aa6d570` |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
-| CI | Green since `08dd17b` (2026-09-24). It had **never** passed — see the entry below |
-| Git | `main`, pushed to `origin`. The 2026-09-24 diarization and download-progress work below is in the commits — see `git log` |
+| CI | Green since `08dd17b` (2026-09-24), including both 2026-10-15 commits |
+| Git | `main`, pushed to `origin`. The 2026-10-15 live-caption and stop-finalization work is in the commits — see `git log` |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
-| Caption latency | Windowed batch decoding: first caption after ~8s, then captions land at the live edge (median ≈0 s), 0.24–0.31× realtime |
+| Caption latency | Windowed batch decoding: captions land at the live edge (median ≈0 s), 0.24–0.31× realtime. The first-caption figure (8.3 s) was measured before the 2026-10-15 changes — re-measure with `tools/replay_lecture.py` |
 | Long run | 10.6 min soak: **0 of 317** window decodes over the 2 s hop, RSS flat. Needs ~2.3 GB of free memory — swapping puts windows over the hop |
-| Caption quality | 10 captions for the 127.3s lecture, none overlapping another, 4 phrases said twice |
+| Caption quality | 10 captions for the 127.3s lecture, none overlapping another, 4 phrases said twice (measured before the 2026-10-15 changes) |
 | Translation | Microsoft configured and working. Google has **no API key**, and its keyless public endpoint is dead — the router now skips it |
 
 Quick health check:
@@ -31,6 +31,91 @@ Quick health check:
 .venv/bin/python -m ruff check .                            # lint
 curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.tool
 ```
+
+## 2026-10-15 — saved transcripts disagreed with the lecture: rewritten captions, a missing opening, a truncated tail
+
+Three defects on the shipped live path, all about what the *saved* transcript contains rather than
+what the screen showed while the lecture ran.
+
+### Fixed: a later window rewrote captions the reader had already read
+Every window decode used to publish all of its sentences as final, and consecutive windows overlap
+by design, so the newest sentence of each hop reached the merger as a "revision" of an earlier
+decode. It is not one: the trailing sentence of a window is a hypothesis, and the next window
+routinely rewords it. History drifted under the reader — a caption could be rewritten up to a full
+window (18 s) after it first appeared — and when the rewrite moved far enough that the merger's
+coverage rule no longer matched the two decodes, the same sentence arrived twice as two rows.
+
+The provider had no memory of what it had already committed, so it could not tell "this sentence is
+new" from "this sentence is the tail I already showed". `MlxWindowedParakeetProvider` now
+stabilises each decode before the merger sees it: sentences are committed only once a *following*
+sentence appears (that is what gives the boundary its right context), the newest sentence stays on
+screen as a stable-id draft (`is_final: false`) that later decodes may rewrite in place, and
+candidates that start inside an already-committed span are suppressed instead of re-emitted. Drafts
+were already a first-class part of the client protocol — the feed renders them as "正在识别 ·
+会自动更新" — so the browser needed no change; the confirmed-caption log now marks a promoted draft
+as 更新 rather than 新增, because that is what the client did with it.
+
+### Fixed: the opening of a lecture was never decoded unguarded
+The head guard exists to hide garbled window openings, but it was applied even when the window began
+at time zero, where there is no earlier speech to protect it from. A window cannot slide left of
+zero, so the first `head_guard` seconds of a recording sat inside the guard of every decode, and
+once the rolling buffer had passed them no later window could pick them up: for a live lecture the
+opening was gone for good, because the flush decode at stop only reaches audio still in the buffer.
+The old comment knew this and accepted it as the price of hiding garbled openings ("a deliberate
+trade ... a real loss of the first sentence"); the fix shows the trade was avoidable, not that it
+was unnoticed.
+
+The guard now applies only once the window starts inside the recording. The unguarded opening decode
+is kept honest by the same draft mechanism as the live edge: its newest sentence is revisable until
+a later window confirms it, and `flush()` promotes whatever draft is left when the session stops, so
+a stop between two hops cannot lose the last sentence either.
+
+### Fixed: a timed-out stop returned before the final transcript existed
+`stop()` joins the workers with a timeout, and the worker thread is where the final drain and
+`provider.flush()` happen — so the acknowledged result could be a snapshot taken before the tail
+was decoded. The browser treated that snapshot as the final transcript and saved it. Two related
+leaks: when the audio queue was full at stop time, enqueueing the stop marker dropped the *oldest
+accepted chunk* to make room, deleting speech exactly at the moment the session ended; and the
+final re-render rebuilt the transcript from the server snapshot, discarding the translations that
+only existed in browser memory.
+
+Audio admission is now closed under the same lock that queues the stop markers, so an in-flight
+chunk either lands before the marker or is refused — it cannot land behind it. A full queue skips
+the marker instead of dropping audio: both workers already exit after draining once `stop_event` is
+set. When the workers outlast the join timeout, `stop()` reports `status="stopping"` with
+`awaiting_final_results` and an interim snapshot; a background thread waits for both workers to
+finish and then emits a second `transcription_stopped` carrying the stable snapshot. The browser
+waits for that event before saving (and preserves per-segment translations when the text is
+unchanged), and `tools/replay_lecture.py` ignores the interim acknowledgement the same way.
+
+Traps worth remembering, recorded because each cost a debugging round:
+
+* `awaiting_final_results` is what tells a client whether a `stopping` result is an interim
+  acknowledgement or already the last word, and it is safe to read outside the manager lock because
+  of the two orderings the lock enforces: either the worker's ready-check wins and it enters the
+  queue loop (which always drains and flushes, so the final event will follow), or the stop wins and
+  the worker returns without producing output at all (so the snapshot really is everything and no
+  event follows). `True` therefore always means a final event is guaranteed.
+* The stop-then-start path pops the old session from `_closing` before joining its worker; the
+  waiter uses an identity check before removing the entry so a fast restart cannot have its state
+  evicted by the previous session's cleanup.
+
+Verified: new tests in `tests/test_mlx_windowed.py` pin each stabilisation rule (stable-id
+promotion, one-word prefix growth, shorter-prefix rejection, adjacent-sentence non-merge, opening
+draft survival, flush of an uncommitted draft); `tests/test_session_manager.py` drives a full audio
+queue through a stop and asserts the second accepted chunk is still transcribed and that the final
+`transcription_stopped` is ordered after the last `transcript_segment`; `tests/test_replay_lecture.py`
+and `tests/test_frontend_contract.py` pin the interim-acknowledgement rules on both clients. Full
+suite: 319 passed, CI green on `aa6d570`.
+
+Known limits, untested against the real lecture on this machine: the stabiliser's tolerances
+(0.28 text similarity, 35% time coverage, 1 s start drift, 500 ms overlap forgiveness) are
+reasoned estimates, not measured populations — a re-decode whose sentence starts more than 500 ms
+before the committed edge is suppressed whole, and its new words wait for the decoder to re-split
+at that boundary. Re-run `tools/replay_lecture.py` over the 127.3 s recording and read the
+overlap/duplicate counts before trusting the numbers; and the final `transcription_stopped` wait
+has no timeout of its own, by design — a hung worker stalls the save flow until the process is
+restarted.
 
 ## 2026-09-24 — CI had never been green, and the first download sat at 5%
 

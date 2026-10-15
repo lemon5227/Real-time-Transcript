@@ -354,6 +354,16 @@ class MlxWindowedParakeetProvider:
             self._live_segment = None
         return sorted(emitted, key=lambda item: (item.start_ms, item.end_ms))
 
+    # Matching the live draft is a judgement about speech, not identity: is the
+    # newest sentence of this decode the row already on screen, growing, or a
+    # different utterance that merely sits next to it? The tolerances lean loose
+    # on wording -- a reworded tail must stay updatable instead of freezing and
+    # then repeating itself -- and tighter on time: two utterances said back to
+    # back rarely overlap for a third of the shorter span within a second of
+    # each other, which is what an actual rewrite does. The costs are not
+    # symmetric: a wrong match only rewrites a row the reader already treats as
+    # provisional (is_final=False), while a miss freezes that row into history
+    # and suppresses the rewrite, so the thresholds sit near the loose end.
     @staticmethod
     def _match_live_segment(
         previous: Optional[TranscriptSegment], candidates: List[TranscriptSegment]

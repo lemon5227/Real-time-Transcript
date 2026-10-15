@@ -40,6 +40,13 @@ because the audio worker resizes its delivery when it falls behind — and a dif
 different window. The *timing* is stable across all of it, which is the part the architecture
 controls.
 
+**The cold-start and revision figures in this table predate the 2026-10-15 provider changes** (see
+the changelog): the provider used to re-publish every sentence on every hop, and the head guard
+discarded the session's opening. The replay counts only *final* captions, and the newest sentence of
+every window is now a draft first — so the first text on screen arrives earlier than these figures
+measure, while the first *final* caption still waits for a following sentence to confirm it. Neither
+figure was re-measured on this machine, so re-run `tools/replay_lecture.py` before quoting them.
+
 Two numbers here are easy to confuse, so both are reported. The **wait before a caption appears** is
 what the reader feels: the first time text for that stretch of audio reaches the screen. The **lag
 of the final wording** is when that caption was last corrected, and it is larger by construction —
@@ -66,32 +73,42 @@ first 26 s of audio:
 | 12 s | 12.0 s | 5.3 s |
 | 18 s (old behaviour) | 18.0 s | 3.5 s |
 
-**The gate does not set the cold start — the head guard does.** With a 6 s window the guard leaves
-only 2 s of publishable audio (offsets 4–6 s), which is too little for the model to form a sentence
-there, so that decode publishes nothing and the first caption comes from the 8 s window. Measured in
-audio seconds, which are wall seconds at realtime pace. The table above is the provider's own
-timing; the end-to-end replay in the summary table measures **8.3 s**, the same figure plus the
-decode. 6 s is kept as the gate over 8 s because it is strictly more responsive — it also catches a
-lecture whose first sentence happens to land early — and the extra decode costs well under a second.
+That table was measured while the head guard applied from time zero, so with a 6 s gate the guard
+left only 2 s of publishable audio (offsets 4–6 s): too little for the model to form a sentence
+there, so that decode published nothing and the first caption came from the 8 s window. **It is no
+longer the guard that sets the cold start, because the guard no longer applies to the start of the
+recording.** A window that begins at time zero has no earlier speech to give its opening context —
+applying the guard there would hide the session's first sentence forever — so the opening is
+decoded unguarded, and the 6 s decode is publishable on its own. Measured in audio seconds, which
+are wall seconds at realtime pace. The end-to-end replay in the summary table measured **8.3 s**,
+the same figure plus the decode, under the old rule and counting only final captions; a draft now
+reaches the screen as soon as that 6 s decode completes. Re-measure before quoting either. 6 s is
+kept as the gate over 8 s because it is strictly more responsive — it also catches a lecture whose
+first sentence happens to land early — and the extra decode costs well under a second.
 
 The opening is not more expensive per second than the rest of the session: 7.3 s of decode for 26 s
 of audio is 0.28× realtime, the same as the steady state, because the window is short exactly while
 the decodes are cheap.
 
 A first attempt used a doubling schedule (6 → 12 → 18 s) instead. It measured a **12.0 s** cold
-start — worse than the simple rule above — because the 6 s decode publishes nothing and the next
-attempt then has to wait until 12 s. Growth by the hop is both simpler and better; the reason is
-that the doubling was fixing a problem the window already solved by itself.
+start — worse than the simple rule above — because with the opening still guarded the 6 s decode
+published nothing and the next attempt then had to wait until 12 s. Growth by the hop is both
+simpler and better; the reason is that the doubling was fixing a problem the window already solved
+by itself.
 
 The head guard (default 4 s) drops sentences that *start* inside the first few seconds of the
-window. Those are the ones the model has no context for, and they are exactly the garbled
-openings. The sentence that follows them is decoded again, in full, by the next window — so
-nothing is lost, it just arrives with its opening intact.
+window, once the window has begun sliding. Those are the ones the model has no context for, and
+they are exactly the garbled openings. The sentence that follows them is decoded again, in full, by
+the next window — so nothing is lost, it just arrives with its opening intact.
 
-One case the guard cannot rescue is the first few seconds of a session: they sit inside the guard
-of every window, and a window cannot slide left of zero, so that opening is never published. The
-loss is bounded by the guard and happens once per session; the alternative is showing the garbled
-opening the guard exists to hide.
+The true start of the recording is deliberately exempt. A window that begins at time zero cannot
+slide left of zero, so a guard there would discard the session's first sentence permanently instead
+of deferring it — the old behaviour, and the reason a lecture's opening used to be missing from its
+transcript. The provider decodes from time zero unguarded instead, and keeps that decode honest a
+different way: the newest sentence of every window is a revisable draft (stable id,
+`is_final: false`) that a later window can rewrite in place, and it only becomes final once a
+following sentence confirms its right context. The same draft mechanism covers the live edge of
+every later window, which is where a decode's newest sentence is always a hypothesis.
 
 `MLX_WINDOW_SECONDS=4` is the enforced floor, but the useful floor is much higher. Windows of 10 s
 or less return **empty output** across quiet stretches and garble the opening of every window,
@@ -172,8 +189,8 @@ compensates for being paged out. `TROUBLESHOOTING.md` leads with this check for 
 ## The streaming decoder is opt-in, and it is not usable for lectures
 
 `MLX_LIVE_MODE=streaming` selects the original `transcribe_stream()` path. It is kept because it is
-the only decoder that can emit *draft* tokens, which the caption feed can show before a sentence
-settles.
+the only decoder that can emit *draft* tokens inside a sentence; the windowed path also publishes a
+draft (its newest sentence, stable id, `is_final: false`), but only once per decode.
 
 It should not be used for lectures. On the same 127.3 s recording:
 
@@ -253,11 +270,12 @@ STREAMING_CHUNK_SECONDS=1.0   # streaming providers only
 ```
 
 Lowering `MLX_HOP_SECONDS` makes captions update more often at a linear CPU cost. It does not make
-the *first* caption appear any sooner: the cold start is set by the head guard and the audio the
-model needs to form a sentence, not by the gate or the window (see the table above — a gate of 6 s
-and of 8 s both land at 8.0 s). `MLX_WINDOW_SECONDS` is the readability knob, and because the
-window grows into it, raising it no longer delays the first caption. Read the sweep above before
-changing either: longer is not better here.
+the *first* caption appear any sooner: the cold start is set by the gate and by how much audio the
+model needs to form a sentence (see the table above — a gate of 6 s and of 8 s both landed at 8.0 s
+while the opening was still guarded; the opening is now decoded unguarded, so the first draft
+caption follows the 6 s gate directly). `MLX_WINDOW_SECONDS` is the readability knob, and because
+the window grows into it, raising it no longer delays the first caption. Read the sweep above
+before changing either: longer is not better here.
 
 The active configuration is reported through `/api/capabilities` under `audio.live`:
 

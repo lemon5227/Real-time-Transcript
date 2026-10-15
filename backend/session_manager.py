@@ -798,4 +798,8 @@ class SessionManager:
                 is_final=False,
                 confidence=segment.confidence,
             )
+            # The draft is already on the client's screen under this id, so the
+            # confirmed caption that replaces it later is an update in place --
+            # and the confirmed-caption log should say 更新, not 新增.
+            state.emitted_segment_ids.add(candidate.id)
             self._emit(state.sid, "transcript_segment", candidate.to_dict())
