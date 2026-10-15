@@ -110,13 +110,14 @@ def test_macos_dmg_workflow_builds_and_publishes_artifact():
     for token in [
         "workflow_dispatch",
         'tags: ["v*"]',
-        "runs-on: macos-14",
+        "runs-on: macos-15",  # Xcode 16 / Swift 6 toolchain for the Nemotron package
         "brew install librsvg",
         "bash scripts/build-macos-dmg.sh",
         "hdiutil imageinfo",
         "actions/upload-artifact@v6",
         "shiju-macos-dmg",
         "拾句-macOS.dmg",
+        "shiju-macOS.dmg",  # gh strips non-ASCII characters from release asset names
         "contents: write",
         "gh release create",
     ]:
