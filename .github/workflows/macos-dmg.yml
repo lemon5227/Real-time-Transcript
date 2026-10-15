@@ -63,10 +63,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # gh/GitHub strip non-ASCII characters from asset names, so the DMG
+          # is uploaded under an ASCII name (拾句-macOS.dmg → shiju-macOS.dmg).
+          ASSET="$OUTPUT_DIR/shiju-macOS.dmg"
+          cp "$OUTPUT_DIR/拾句-macOS.dmg" "$ASSET"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$OUTPUT_DIR/拾句-macOS.dmg" --clobber
+            gh release upload "$GITHUB_REF_NAME" "$ASSET" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$OUTPUT_DIR/拾句-macOS.dmg" \
+            gh release create "$GITHUB_REF_NAME" "$ASSET" \
               --verify-tag \
               --generate-notes \
               --title "拾句 $VERSION"
