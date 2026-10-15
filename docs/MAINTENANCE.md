@@ -253,6 +253,23 @@ These have each cost real time. They are properties of this machine, not of the 
   hallucinations are handled separately by the `no_speech_prob` filter, and they are *not*
   reachable by dedup when consecutive windows do not overlap.
 
+## Cutting a DMG release
+
+Push an annotated tag (`git tag -a vX.Y.Z -m "拾句 X.Y.Z" && git push origin vX.Y.Z`): the
+`macOS DMG` workflow builds the app and publishes the Release with the asset. To rehearse
+without publishing, run `gh workflow run "macOS DMG"` and download the artifact instead.
+
+- **The runner needs a Swift 6 toolchain** (`macos-15`): the Nemotron helper's package is
+  `swift-tools-version: 6.0`, and the `macos-14` image's Swift 5.10 cannot resolve it. This
+  breakage sat invisible from 2026-09-24 to 2026-10-15 because CI never runs the DMG workflow.
+- **`build-macos-dmg.sh` reads the helper from `.build/release/`** — SwiftPM's canonical
+  location. `.build/out/Products/Release/` exists only on machines that built via Xcode.
+- **gh strips non-ASCII characters from release asset names** (`拾句-macOS.dmg` → `-macOS.dmg`),
+  so the release step uploads a copy named `shiju-macOS.dmg`.
+- The workflow file is pinned token-by-token in
+  `tests/test_deployment_files.py::test_macos_dmg_workflow_builds_and_publishes_artifact`;
+  update that test in the same commit as any workflow change, or CI goes red on `main`.
+
 ## Reproducing latency numbers
 
 `tools/` holds the three probes. All of them drive a live server over the socket API.

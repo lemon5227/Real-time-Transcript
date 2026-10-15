@@ -48,7 +48,7 @@ Mac 的 MLX 请使用原生启动，Docker 不能直接使用宿主机 Metal。�
 ### macOS DMG 自动构建
 
 GitHub Actions 中的 `macOS DMG` 工作流会在 `workflow_dispatch` 手动运行时生成可下载的
-`拾句-macOS.dmg` 构建产物；推送匹配 `v*` 的版本标签还会自动把同一个 DMG 附加到 GitHub Release：
+`拾句-macOS.dmg` 构建产物；推送匹配 `v*` 的版本标签还会自动把 DMG 作为 `shiju-macOS.dmg` 附加到 GitHub Release（GitHub 会剥掉资产名中的非 ASCII 字符）：
 
 ```bash
 git tag v0.1.0

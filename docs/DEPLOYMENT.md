@@ -87,7 +87,8 @@ continues to use `.venv` and `.env` in the repository.
 The repository includes a `macOS DMG` workflow for repeatable distribution. It
 runs on `workflow_dispatch` and uploads `拾句-macOS.dmg` as the
 `shiju-macos-dmg` artifact. A pushed tag matching `v*` also creates or updates a
-GitHub Release and attaches the DMG:
+GitHub Release and attaches the DMG as `shiju-macOS.dmg` (GitHub strips
+non-ASCII characters from asset names):
 
 ```bash
 git tag v0.1.0

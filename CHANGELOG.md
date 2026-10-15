@@ -14,10 +14,11 @@ Related documents:
 
 | | |
 | --- | --- |
-| Tests | **319 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `aa6d570` |
+| Tests | **319 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
-| CI | Green since `08dd17b` (2026-09-24), including both 2026-10-15 commits |
-| Git | `main`, pushed to `origin`. The 2026-10-15 live-caption and stop-finalization work is in the commits — see `git log` |
+| CI | Green on `f5ee023` (2026-10-15). Three pushes earlier that evening went red on a workflow-contract test still pinning `runs-on: macos-14`; the test now pins `macos-15` and the ASCII asset name |
+| Git | `main`, pushed to `origin` (`f5ee023`); annotated tag `v0.1.0` |
+| Releases | `v0.1.0` — the first GitHub Release. Asset `shiju-macOS.dmg` (9.3 MB) from the `macOS DMG` workflow; downloaded, mounted, bundled sources hash-match the repo |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
 | Caption latency | Windowed batch decoding: captions land at the live edge (median ≈0 s), 0.24–0.31× realtime. The first-caption figure (8.3 s) was measured before the 2026-10-15 changes — re-measure with `tools/replay_lecture.py` |
 | Long run | 10.6 min soak: **0 of 317** window decodes over the 2 s hop, RSS flat. Needs ~2.3 GB of free memory — swapping puts windows over the hop |
@@ -31,6 +32,48 @@ Quick health check:
 .venv/bin/python -m ruff check .                            # lint
 curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.tool
 ```
+
+## 2026-10-15 — the DMG workflow had not survived the diarizer integration; the first Release
+
+The roadmap's P1 item said the quiet part out loud: "the workflow file existing is not the same
+as the latest fixes having built on GitHub." It was right. The last successful DMG build was
+2026-09-11; the Nemotron diarizer integration (2026-09-24) broke the workflow without CI
+noticing, because CI never runs the DMG workflow. The first dispatch on 2026-10-15 failed twice
+before a build came out, and the publish step had a third defect of its own.
+
+### Fixed: every build since the diarizer integration died at Swift package resolution
+The Nemotron helper's package declares `swift-tools-version: 6.0`, but the `macos-14` runner
+image ships Swift 5.10, so `swift package resolve` refused the package outright. The workflow
+now runs on `macos-15` (Xcode 16 / Swift 6). The development machine had Swift 6 all along,
+which is why the failure was CI-only.
+
+### Fixed: the build script expected an Xcode-only binary layout
+`scripts/build-macos-dmg.sh` looked for the helper at
+`.build/out/Products/Release/echonote-nemotron-diarizer` — an Xcode-style path that exists only
+on the machine that created the binary during the integration. Plain `swift build -c release`
+publishes to `.build/release/` (a symlink to the triple-specific directory), so CI failed at
+"helper was not built" *after* a successful compile. The script now reads the canonical path;
+on the integration machine it resolves to the same file.
+
+### Fixed: gh strips non-ASCII characters from release asset names
+The first tagged Release published the DMG as `-macOS.dmg` — the 拾句 prefix was silently gone.
+Reproduced outside CI with gh 2.101.0: uploading `拾句-test.txt` lands as `-test.txt`. The
+release step now uploads a copy named `shiju-macOS.dmg`; the build artifact and local `dist/`
+keep the Chinese name, which GitHub's artifact store handles fine.
+
+### Fixed: the contract test still pinned the old runner — found by CI going red on the fixes
+`tests/test_deployment_files.py` asserts the workflow's contract tokens, including
+`runs-on: macos-14`. The runner bump made it fail on `main`; three pushes went red before the
+suite was next run locally. The test now pins `macos-15` (with the Swift 6 rationale) and
+`shiju-macOS.dmg`, so the next drift fails in the suite instead of on `main`.
+
+Verified: `gh workflow run "macOS DMG"` → artifact downloaded (9.3 MB) and mounted — the
+bundled `backend/session_manager.py`, `backend/providers/mlx_windowed.py` and `static/app.js`
+hash-match the repo, the helper inside is an arm64 executable, and the bundle version is right.
+Then tag `v0.1.0` → the tagged run built and published the Release. The tag moved twice while
+the verification was in flight (once after the asset-name fix, once to `f5ee023`, the commit
+whose own CI run is green); the final Release's asset was downloaded through the public URL
+(302 → 200, 9,741,455 bytes), mounted, and hash-checked again.
 
 ## 2026-10-15 — saved transcripts disagreed with the lecture: rewritten captions, a missing opening, a truncated tail
 

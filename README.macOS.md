@@ -18,7 +18,8 @@ Allow microphone access for the browser at `http://127.0.0.1:5001`. See [privacy
 
 The `macOS DMG` workflow builds `拾句-macOS.dmg` on `workflow_dispatch` and uploads
 it as the `shiju-macos-dmg` artifact. Pushing a version tag matching `v*` also
-attaches the same DMG to a GitHub Release:
+attaches the DMG to a GitHub Release as `shiju-macOS.dmg` (GitHub strips
+non-ASCII characters from asset names):
 
 ```bash
 git tag v0.1.0
