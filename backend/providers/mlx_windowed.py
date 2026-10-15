@@ -18,14 +18,18 @@ does not wait for a full window of audio to accumulate. The cold start is then s
 by the shortest window that produces a sentence past the head guard (8s measured
 on the real lecture) rather than by the configured window length.
 
-Consecutive windows overlap by design, and ``SegmentMerger`` already knows how
-to drop an exact repeat and to replace a partial decode with the more complete
-one, re-using the original id so the client updates the caption in place.
+Consecutive windows overlap by design, but a decode's last sentence is only a
+hypothesis: the next window may rewrite it. Keep that sentence as a stable-id
+draft in the live feed, promote it when a following sentence appears, and never
+re-emit already committed history from later windows.
 """
 
 from __future__ import annotations
 
+import re
 import time
+from dataclasses import replace
+from difflib import SequenceMatcher
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -71,13 +75,11 @@ MIN_WINDOW_SECONDS = 4.0
 # real context behind it. Audio inside the guard is not lost: the window keeps
 # sliding, so the same speech is re-decoded from a later, better-informed window.
 #
-# The one place that reasoning does not hold is the start of the recording: the
-# window cannot slide left of zero, so the first ``head_guard`` seconds of a
-# session are inside the guard of every decode and are never published. That is
-# a deliberate trade -- those seconds genuinely have no left context, so the
-# alternative is showing the garbled opening the guard exists to hide -- but it
-# is a real loss of the first sentence, not the "nothing is lost" the sentence
-# above describes. It is bounded by this constant and happens once per session.
+# The guard only applies after the window starts inside the recording. At the
+# true beginning there is no earlier speech to provide as context, so applying
+# it there would permanently discard the opening sentence. Keep decoding from
+# time zero unguarded; its trailing sentence remains a revisable draft until a
+# later window supplies more context.
 DEFAULT_HEAD_GUARD_SECONDS = 4.0
 
 
@@ -129,6 +131,8 @@ class MlxWindowedParakeetProvider:
         self._total_samples = 0
         self._decoded_samples = 0
         self._segment_number = 0
+        self._committed_until_ms = 0
+        self._live_segment: Optional[TranscriptSegment] = None
 
     @property
     def window_seconds(self) -> float:
@@ -155,6 +159,8 @@ class MlxWindowedParakeetProvider:
         self._total_samples = 0
         self._decoded_samples = 0
         self._segment_number = 0
+        self._committed_until_ms = 0
+        self._live_segment = None
         try:
             if self._model_cache is not None:
                 self._model = self._model_cache.acquire(self.model)
@@ -208,27 +214,40 @@ class MlxWindowedParakeetProvider:
     def flush(self) -> List[TranscriptSegment]:
         if self._model is None or self._config is None:
             return []
-        if self._total_samples <= 0 or self._total_samples <= self._decoded_samples:
+        if self._total_samples <= 0:
             return []
-        # The lecture is over, so the tail no longer needs the head guard: the
-        # last few seconds would otherwise never be published.
-        return self._decode_window(head_guard_samples=0)
+        if self._total_samples > self._decoded_samples:
+            # The lecture is over, so the tail no longer needs the head guard:
+            # the last few seconds would otherwise never be published.
+            return self._decode_window(head_guard_samples=0, final=True)
+        if self._live_segment is None:
+            return []
+        # A stop may arrive before another model hop. The last visible draft is
+        # still useful and should become part of the saved lecture.
+        final_segment = replace(self._live_segment, is_final=True)
+        self._live_segment = None
+        self._committed_until_ms = max(self._committed_until_ms, final_segment.end_ms)
+        return [final_segment]
 
     def close(self) -> None:
         self._release_model_cache()
         self._model = None
         self._config = None
         self._buffer = np.empty(0, dtype=np.float32)
+        self._live_segment = None
 
     def _decode_window(
-        self, head_guard_samples: Optional[int] = None
+        self, head_guard_samples: Optional[int] = None, final: bool = False
     ) -> List[TranscriptSegment]:
-        guard = self._head_guard_samples if head_guard_samples is None else head_guard_samples
         # The window ends at the live edge and is at most the configured window
         # long. Early in a session that is all the audio there is, which is what
         # lets the first caption arrive before a full window has accumulated.
         window = self._buffer[-self._window_samples :]
         window_start = self._total_samples - int(window.size)
+        if head_guard_samples is None:
+            guard = 0 if window_start == 0 else self._head_guard_samples
+        else:
+            guard = head_guard_samples
         started = time.monotonic()
         try:
             result = self._transcribe(window)
@@ -245,6 +264,7 @@ class MlxWindowedParakeetProvider:
         self._decoded_samples = self._total_samples
         self._trim_buffer()
         segments = self._segments_from_result(result, window_start, guard)
+        segments = self._stabilize_segments(segments, final=final)
         logger.debug(
             "滑窗解码 音频=%.2fs 解码=%.2fs 窗口起点=%.2fs 输出=%d 段",
             window.size / SAMPLE_RATE,
@@ -253,6 +273,149 @@ class MlxWindowedParakeetProvider:
             len(segments),
         )
         return segments
+
+    def _stabilize_segments(
+        self, candidates: List[TranscriptSegment], *, final: bool
+    ) -> List[TranscriptSegment]:
+        """Publish only stable history; keep the newest decoded sentence live.
+
+        A full-context decode may still revise its trailing sentence on the next
+        hop. Treating every decode as final caused the merger to rewrite saved
+        history with these temporary hypotheses. The provider already has the
+        full rolling result, so it can commit each sentence once a later one
+        appears and ignore old sentences on subsequent re-decodes.
+        """
+        candidates = sorted(candidates, key=lambda item: (item.start_ms, item.end_ms))
+        if not candidates:
+            if final and self._live_segment is not None:
+                completed = replace(self._live_segment, is_final=True)
+                self._live_segment = None
+                self._committed_until_ms = max(self._committed_until_ms, completed.end_ms)
+                return [completed]
+            return []
+
+        previous_live = self._live_segment
+        matched_index = self._match_live_segment(previous_live, candidates)
+        emitted: List[TranscriptSegment] = []
+
+        # If a new decode no longer contains the active sentence, freeze the
+        # last version the student actually saw before considering new speech.
+        if previous_live is not None and matched_index is None:
+            emitted.append(replace(previous_live, is_final=True))
+            self._committed_until_ms = max(
+                self._committed_until_ms, previous_live.end_ms
+            )
+            self._live_segment = None
+
+        for index, candidate in enumerate(candidates):
+            is_tail = index == len(candidates) - 1
+            matches_live = previous_live is not None and index == matched_index
+
+            if matches_live:
+                candidate = self._preserve_longer_prefix(previous_live, candidate)
+                candidate = replace(candidate, id=previous_live.id)
+                if not is_tail or final:
+                    candidate = replace(candidate, is_final=True)
+                    emitted.append(candidate)
+                    self._committed_until_ms = max(
+                        self._committed_until_ms, candidate.end_ms
+                    )
+                    self._live_segment = None
+                else:
+                    candidate = replace(candidate, is_final=False)
+                    emitted.append(candidate)
+                    self._live_segment = candidate
+                continue
+
+            # A later window repeats the already committed context. Never let
+            # those old hypotheses revise confirmed rows, even if their wording
+            # or sentence boundaries changed this time.
+            if candidate.start_ms < self._committed_until_ms:
+                overlaps_committed_tail = (
+                    is_tail
+                    and candidate.end_ms > self._committed_until_ms
+                    and self._committed_until_ms - candidate.start_ms <= 500
+                )
+                if not overlaps_committed_tail:
+                    continue
+
+            if is_tail and not final:
+                candidate = replace(candidate, is_final=False)
+                self._live_segment = candidate
+                emitted.append(candidate)
+            else:
+                candidate = replace(candidate, is_final=True)
+                emitted.append(candidate)
+                self._committed_until_ms = max(
+                    self._committed_until_ms, candidate.end_ms
+                )
+
+        if final:
+            self._live_segment = None
+        return sorted(emitted, key=lambda item: (item.start_ms, item.end_ms))
+
+    @staticmethod
+    def _match_live_segment(
+        previous: Optional[TranscriptSegment], candidates: List[TranscriptSegment]
+    ) -> Optional[int]:
+        """Match only the active tail, not arbitrary overlapping history."""
+        if previous is None:
+            return None
+        possible = []
+        previous_text = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", previous.text.casefold())
+        previous_tokens = re.findall(r"[a-z0-9]+|[\u3400-\u9fff]", previous.text.casefold())
+        for index, candidate in enumerate(candidates):
+            start_delta = abs(candidate.start_ms - previous.start_ms)
+            overlap_ms = max(0, min(candidate.end_ms, previous.end_ms) - max(
+                candidate.start_ms, previous.start_ms
+            ))
+            shorter_duration = min(
+                previous.end_ms - previous.start_ms,
+                candidate.end_ms - candidate.start_ms,
+            )
+            candidate_text = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", candidate.text.casefold())
+            candidate_tokens = re.findall(r"[a-z0-9]+|[\u3400-\u9fff]", candidate.text.casefold())
+            text_similarity = SequenceMatcher(
+                None, previous_text, candidate_text, autojunk=False
+            ).ratio()
+            is_growing_prefix = (
+                len(previous_text) >= 2
+                and len(candidate_tokens) >= len(previous_tokens)
+                and candidate_tokens[: len(previous_tokens)] == previous_tokens
+                and start_delta <= 500
+                and shorter_duration > 0
+                and overlap_ms / shorter_duration >= 0.7
+            )
+            if (
+                start_delta <= 1000
+                and shorter_duration > 0
+                and overlap_ms / shorter_duration >= 0.35
+                and (text_similarity >= 0.28 or is_growing_prefix)
+            ):
+                possible.append((start_delta, -candidate.end_ms, index))
+        if not possible:
+            return None
+        return min(possible)[2]
+
+    @staticmethod
+    def _preserve_longer_prefix(
+        previous: TranscriptSegment, candidate: TranscriptSegment
+    ) -> TranscriptSegment:
+        """Do not turn a fuller live hypothesis into its shorter prefix."""
+        previous_text = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", previous.text.casefold())
+        candidate_text = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", candidate.text.casefold())
+        if (
+            len(candidate_text) < len(previous_text)
+            and candidate_text
+            and previous_text.startswith(candidate_text)
+        ):
+            return replace(
+                candidate,
+                text=previous.text,
+                start_ms=min(previous.start_ms, candidate.start_ms),
+                end_ms=max(previous.end_ms, candidate.end_ms),
+            )
+        return candidate
 
     def _transcribe(self, window: np.ndarray) -> object:
         if self._transcribe_override is not None:

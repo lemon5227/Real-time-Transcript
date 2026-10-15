@@ -128,19 +128,156 @@ def test_provider_decodes_once_per_hop_after_the_first_window():
 
 
 def test_provider_publishes_sentences_past_the_head_guard_with_absolute_times():
-    """A window decodes its own start without left context, so that part is held back."""
-    def transcribe(window):
-        return result(
+    """Once a window starts mid-recording, its context-poor opening is held back."""
+    outputs = [
+        result(),
+        result(),
+        result(
             sentence("garbled opening", 0.0, 1.5),
             sentence("a real sentence", 2.5, 3.5),
-        )
+        ),
+    ]
 
-    provider = make_provider(transcribe)
+    provider = make_provider(lambda _window: outputs.pop(0))
     start(provider)
+    provider.push(np.zeros(4 * 16000, dtype=np.float32))
+    provider.push(np.zeros(2 * 16000, dtype=np.float32))
+    segments = provider.push(np.zeros(2 * 16000, dtype=np.float32))
+
+    assert [(item.text, item.is_final) for item in segments] == [("a real sentence", False)]
+    assert (segments[0].start_ms, segments[0].end_ms) == (4500, 5500)
+
+
+def test_provider_does_not_drop_speech_at_the_start_of_the_recording():
+    provider = make_provider(
+        lambda _window: result(
+            sentence("Opening sentence.", 0.3, 2.2),
+            sentence("A later sentence.", 2.5, 3.5),
+        )
+    )
+    start(provider)
+
     segments = provider.push(np.zeros(4 * 16000, dtype=np.float32))
 
-    assert [(item.text, item.is_final) for item in segments] == [("a real sentence", True)]
-    assert (segments[0].start_ms, segments[0].end_ms) == (2500, 3500)
+    assert [(item.text, item.is_final) for item in segments] == [
+        ("Opening sentence.", True),
+        ("A later sentence.", False),
+    ]
+    assert (segments[0].start_ms, segments[0].end_ms) == (300, 2200)
+
+
+def test_provider_keeps_the_live_sentence_provisional_until_a_following_sentence():
+    """A full-context window is final for that decode, not final across windows.
+
+    The rolling decoder revisits its newest sentence every hop. Keep that tail
+    editable, then promote it only when a later sentence gives it right context.
+    Previously confirmed sentences must not be replayed from subsequent windows.
+    """
+    outputs = [
+        result(
+            sentence("Earlier sentence.", 2.5, 3.0),
+            sentence("The live sentence starts", 3.1, 3.8),
+        ),
+        result(
+            sentence("Earlier sentence, now incorrectly revised.", 2.5, 3.0),
+            sentence("The live sentence starts to make sense.", 3.1, 4.4),
+            sentence("A new sentence.", 4.5, 5.5),
+        ),
+    ]
+
+    provider = make_provider(lambda _window: outputs.pop(0))
+    start(provider)
+
+    first = provider.push(np.zeros(4 * 16000, dtype=np.float32))
+    second = provider.push(np.zeros(2 * 16000, dtype=np.float32))
+
+    assert [(item.text, item.is_final) for item in first] == [
+        ("Earlier sentence.", True),
+        ("The live sentence starts", False),
+    ]
+    assert [(item.text, item.is_final) for item in second] == [
+        ("The live sentence starts to make sense.", True),
+        ("A new sentence.", False),
+    ]
+    assert second[0].id == first[1].id
+    assert second[1].id != first[1].id
+
+
+def test_provider_does_not_merge_adjacent_sentences_with_slightly_overlapping_times():
+    outputs = [
+        result(sentence("Okay?", 2.5, 3.0)),
+        result(sentence("Let's start now.", 2.9, 3.8)),
+    ]
+    provider = make_provider(lambda _window: outputs.pop(0))
+    start(provider)
+
+    first = provider.push(np.zeros(4 * 16000, dtype=np.float32))
+    second = provider.push(np.zeros(2 * 16000, dtype=np.float32))
+
+    assert [(item.text, item.is_final) for item in first] == [("Okay?", False)]
+    assert [(item.text, item.is_final) for item in second] == [
+        ("Okay?", True),
+        ("Let's start now.", False),
+    ]
+    assert second[0].id == first[0].id
+    assert second[1].id != first[0].id
+
+
+def test_provider_keeps_a_one_word_prefix_live_when_the_sentence_expands():
+    outputs = [
+        result(sentence("So", 2.5, 2.9)),
+        result(sentence("So the wrong assumption would be that the majority of society", 2.5, 7.8)),
+    ]
+    provider = make_provider(lambda _window: outputs.pop(0))
+    start(provider)
+
+    first = provider.push(np.zeros(4 * 16000, dtype=np.float32))
+    second = provider.push(np.zeros(2 * 16000, dtype=np.float32))
+
+    assert [(item.text, item.is_final) for item in first] == [("So", False)]
+    assert [(item.text, item.is_final) for item in second] == [
+        ("So the wrong assumption would be that the majority of society", False)
+    ]
+    assert second[0].id == first[0].id
+
+
+def test_provider_does_not_finalize_a_shorter_prefix_of_the_live_hypothesis():
+    outputs = [
+        result(sentence("The live sentence starts to make sense.", 2.5, 3.8)),
+        result(
+            sentence("The live sentence starts.", 2.5, 3.8),
+            sentence("A following thought.", 3.9, 4.8),
+        ),
+    ]
+    provider = make_provider(lambda _window: outputs.pop(0))
+    start(provider)
+
+    first = provider.push(np.zeros(4 * 16000, dtype=np.float32))
+    second = provider.push(np.zeros(2 * 16000, dtype=np.float32))
+
+    assert first[0].is_final is False
+    assert [(item.text, item.is_final) for item in second] == [
+        ("The live sentence starts to make sense.", True),
+        ("A following thought.", False),
+    ]
+    assert second[0].id == first[0].id
+
+
+def test_provider_confirms_the_latest_draft_when_stopped_before_the_next_hop():
+    provider = make_provider(
+        lambda _window: result(sentence("The final thought.", 2.5, 3.8))
+    )
+    start(provider)
+
+    draft = provider.push(np.zeros(4 * 16000, dtype=np.float32))[0]
+    confirmed = provider.flush()
+
+    assert draft.is_final is False
+    assert len(confirmed) == 1
+    assert confirmed[0].id == draft.id
+    assert confirmed[0].text == draft.text
+    assert confirmed[0].is_final is True
+    assert provider.flush() == []
 
 
 def test_provider_offsets_sentences_by_the_window_position():
@@ -155,26 +292,26 @@ def test_provider_offsets_sentences_by_the_window_position():
     provider.push(np.zeros(2 * 16000, dtype=np.float32))
     segments = provider.push(np.zeros(2 * 16000, dtype=np.float32))
 
-    # The window now ends at 8s and covers 2s..8s, so 2.5s into it is 4.5s.
-    assert segments[0].start_ms == 4500
-    assert segments[0].end_ms == 5500
+    # The earlier live row is committed first, followed by the new live row.
+    assert [item.start_ms for item in segments] == [2500, 4500]
+    assert [item.is_final for item in segments] == [True, False]
+    assert segments[-1].end_ms == 5500
 
 
-def test_provider_flush_publishes_the_tail_without_the_head_guard():
+def test_provider_flush_confirms_the_opening_draft_without_duplicating_it():
     def transcribe(window):
         return result(sentence("the very last words", 0.0, 1.0))
 
     provider = make_provider(transcribe)
     start(provider)
 
-    provider.push(np.zeros(4 * 16000, dtype=np.float32))
-    # Nothing new since the last decode, so flush has nothing to add.
-    assert provider.flush() == []
-
-    provider.push(np.zeros(1 * 16000, dtype=np.float32))
+    draft = provider.push(np.zeros(4 * 16000, dtype=np.float32))[0]
     flushed = provider.flush()
 
     assert [item.text for item in flushed] == ["the very last words"]
+    assert flushed[0].id == draft.id
+    assert flushed[0].is_final is True
+    assert provider.flush() == []
 
 
 def test_provider_rejects_a_language_parakeet_cannot_transcribe():
