@@ -253,6 +253,13 @@ These have each cost real time. They are properties of this machine, not of the 
   hallucinations are handled separately by the `no_speech_prob` filter, and they are *not*
   reachable by dedup when consecutive windows do not overlap.
 
+- **JSONL reading in a text-mode pipe: `select` + `readline` drops lines.** A `TextIOWrapper`
+  can pull several lines into its buffer in one read; `select` then sees the file descriptor
+  idle while complete lines are still waiting (the diarizer helper's `prepare` streams many
+  `download_progress` lines back-to-back). Read through a reader thread + queue instead —
+  `_stream_lines` in `backend/providers/diarization.py`. The session path stays safe with
+  `select` because exactly one response line is pending at a time.
+
 ## Cutting a DMG release
 
 Push an annotated tag (`git tag -a vX.Y.Z -m "拾句 X.Y.Z" && git push origin vX.Y.Z`): the

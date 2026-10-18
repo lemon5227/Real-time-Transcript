@@ -7,6 +7,7 @@ JSON Lines so the Parakeet MLX worker never waits for speaker identification.
 The helper accepts:
 
 ```json
+{"type":"prepare","variant":"low"}
 {"type":"start","sample_rate":16000,"variant":"low"}
 {"type":"audio","start_ms":1200,"pcm16_base64":"..."}
 {"type":"flush"}
@@ -14,8 +15,12 @@ The helper accepts:
 ```
 
 It returns `ready`, `speaker_turns`, `stopped`, or an error such as
-`DIARIZATION_MODEL_UNAVAILABLE`. stdout is reserved for JSON protocol messages;
-diagnostic text goes to stderr and is consumed by the Python parent.
+`DIARIZATION_MODEL_UNAVAILABLE`. The `prepare` request downloads and compiles
+the requested preset ahead of class and streams any number of
+`download_progress` events (a `fraction` in `[0, 1]`) before its final `ready`;
+the live session requests keep the one-response-per-request shape. stdout is
+reserved for JSON protocol messages; diagnostic text goes to stderr and is
+consumed by the Python parent.
 
 The model is loaded from the shared FluidAudio cache. Set `NEMOTRON_MODEL_DIR`
 to the parent directory containing `nemotron-3-diarization` to reuse an

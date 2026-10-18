@@ -466,3 +466,25 @@ def test_frontend_drops_a_caption_the_server_retracts():
     # The row has to leave the DOM and the stored transcript, not just one of them.
     assert "removeChild(article)" in javascript
     assert "state.segments.filter" in javascript
+
+
+def test_settings_model_library_manages_the_diarizer_model():
+    """The settings page must offer Nemotron prep without starting a session.
+
+    The card reuses the transcription cards' status vocabulary (未下载 / 下载中 /
+    已下载) so the drawer does not grow a second set of status words.
+    """
+    javascript = create_app({}).test_client().get("/static/app.js").get_data(as_text=True)
+
+    for hook in [
+        "/api/diarization/model",
+        "fetchDiarizationModel",
+        "downloadDiarizationModel",
+        "deleteDiarizationModel",
+        "renderDiarizationCard",
+        "data-diarization-action",
+        "state.diarizationModel",
+        "说话人识别 · Nemotron 3",
+        "syncModelPolling",
+    ]:
+        assert hook in javascript

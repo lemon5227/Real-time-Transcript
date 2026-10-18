@@ -30,3 +30,21 @@ def test_native_helper_documents_shared_model_cache_and_protocol():
     assert "HF_HUB_CACHE" in readme
     assert "JSON Lines" in readme
     assert "DIARIZATION_MODEL_UNAVAILABLE" in readme
+
+
+def test_native_helper_prepares_the_model_with_download_progress():
+    source = (NATIVE_ROOT / "Sources" / "NemotronDiarizer" / "main.swift").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'case "prepare"' in source
+    assert '"download_progress"' in source
+    assert "progressHandler" in source
+    assert "fractionCompleted" in source
+
+
+def test_native_helper_readme_documents_the_prepare_request():
+    readme = (NATIVE_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert '"prepare"' in readme
+    assert "download_progress" in readme

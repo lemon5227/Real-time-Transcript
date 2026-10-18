@@ -5,11 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import os
+import queue
 import select
 import shlex
 import subprocess
 import threading
-from typing import List, Optional, Protocol, Sequence, Union
+from typing import Callable, List, Optional, Protocol, Sequence, Union
 
 import numpy as np
 
@@ -17,6 +18,14 @@ from ..diarization import SpeakerTurn
 from .base import ProviderError
 
 Command = Union[str, Sequence[str]]
+
+
+class DiarizationPrepareError(RuntimeError):
+    """The helper could not download or compile the speaker model weights."""
+
+    def __init__(self, message: str, *, code: str = "DIARIZATION_PREPARE_FAILED") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class SpeakerDiarizer(Protocol):
@@ -148,25 +157,7 @@ class JsonlNemotronDiarizer:
             self._process = None
             if process is None:
                 return
-            try:
-                if process.poll() is None and process.stdin is not None:
-                    process.stdin.write(json.dumps({"type": "stop"}) + "\n")
-                    process.stdin.flush()
-            except (BrokenPipeError, OSError, ValueError):
-                pass
-            try:
-                process.stdin.close() if process.stdin is not None else None
-            except (OSError, ValueError):
-                pass
-            try:
-                process.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                process.terminate()
-                try:
-                    process.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=1.0)
+            _terminate_helper(process)
 
     def _request(self, payload: dict) -> dict:
         with self._lock:
@@ -222,14 +213,14 @@ class JsonlNemotronDiarizer:
             return response
 
     def _readline(self, stdout) -> str:
-        ready, _, _ = select.select([stdout], [], [], self._request_timeout_seconds)
-        if not ready:
+        try:
+            return _read_line(stdout, self._request_timeout_seconds)
+        except TimeoutError as exc:
             raise ProviderError(
                 "DIARIZATION_TIMEOUT",
                 "说话人识别响应超时",
                 "关闭说话人识别后重试",
-            )
-        return stdout.readline().strip()
+            ) from exc
 
     @staticmethod
     def _turns_from_response(response: dict) -> List[SpeakerTurn]:
@@ -282,6 +273,152 @@ class JsonlNemotronDiarizer:
                 del line
 
         threading.Thread(target=drain, name="diarization-stderr", daemon=True).start()
+
+
+def _read_line(stdout, timeout_seconds: float) -> str:
+    ready, _, _ = select.select([stdout], [], [], timeout_seconds)
+    if not ready:
+        raise TimeoutError("no response line within the timeout")
+    return stdout.readline().strip()
+
+
+def _stream_lines(stdout, timeout_seconds: float):
+    """Yield response lines with a stall timeout.
+
+    ``select`` cannot be combined with ``readline`` here: the text wrapper may
+    read several queued lines into its buffer, after which the file descriptor
+    looks idle while complete lines are still waiting. A reader thread plus a
+    queue keeps the timeout semantics without losing buffered lines.
+    """
+    lines: "queue.Queue[Optional[str]]" = queue.Queue()
+
+    def pump() -> None:
+        try:
+            for line in stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    threading.Thread(target=pump, name="diarization-prepare-reader", daemon=True).start()
+    while True:
+        try:
+            line = lines.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            raise TimeoutError("no response line within the timeout") from exc
+        if line is None:
+            return
+        yield line
+
+
+def _terminate_helper(process: subprocess.Popen[str]) -> None:
+    try:
+        if process.poll() is None and process.stdin is not None:
+            process.stdin.write(json.dumps({"type": "stop"}) + "\n")
+            process.stdin.flush()
+    except (BrokenPipeError, OSError, ValueError):
+        pass
+    try:
+        process.stdin.close() if process.stdin is not None else None
+    except (OSError, ValueError):
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1.0)
+
+
+def prepare_nemotron_models(
+    command: Command,
+    *,
+    variant: str = "low",
+    on_progress: Optional[Callable[[float], None]] = None,
+    line_timeout_seconds: float = 300.0,
+) -> None:
+    """Ask the Swift helper to download and compile the preset weights.
+
+    Unlike the session protocol (exactly one response per request) this request
+    streams any number of `download_progress` lines until a final `ready` or
+    `error`. It exists so the settings page can prepare the model before class
+    without touching the live `start`/`audio`/`flush` path.
+    """
+    argv = JsonlNemotronDiarizer._normalize_command(command)
+    if not argv:
+        raise DiarizationPrepareError(
+            "本机没有安装说话人识别组件",
+            code="DIARIZATION_HELPER_UNAVAILABLE",
+        )
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=os.environ.copy(),
+        )
+    except OSError as exc:
+        raise DiarizationPrepareError(
+            "说话人识别组件无法启动",
+            code="DIARIZATION_HELPER_UNAVAILABLE",
+        ) from exc
+    JsonlNemotronDiarizer._drain_stderr(process)
+    try:
+        process.stdin.write(json.dumps({"type": "prepare", "variant": variant}) + "\n")
+        process.stdin.flush()
+        responses = _stream_lines(process.stdout, line_timeout_seconds)
+        while True:
+            try:
+                line = next(responses).strip()
+            except TimeoutError as exc:
+                raise DiarizationPrepareError(
+                    "模型下载超时，请检查网络后重试",
+                    code="DIARIZATION_PREPARE_TIMEOUT",
+                ) from exc
+            except StopIteration:
+                raise DiarizationPrepareError(
+                    "说话人识别组件提前退出",
+                    code="DIARIZATION_HELPER_FAILED",
+                ) from None
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise DiarizationPrepareError(
+                    "说话人识别组件返回了无效数据",
+                    code="DIARIZATION_PROTOCOL_ERROR",
+                ) from exc
+            if not isinstance(message, dict):
+                raise DiarizationPrepareError(
+                    "说话人识别组件返回格式无效",
+                    code="DIARIZATION_PROTOCOL_ERROR",
+                )
+            kind = message.get("type")
+            if kind == "download_progress":
+                if on_progress is not None:
+                    try:
+                        fraction = float(message.get("fraction") or 0.0)
+                    except (TypeError, ValueError):
+                        fraction = 0.0
+                    on_progress(max(0.0, min(1.0, fraction)))
+                continue
+            if kind == "ready":
+                return
+            if kind == "error":
+                raise DiarizationPrepareError(
+                    str(message.get("message") or "说话人模型下载失败"),
+                    code=str(message.get("code") or "DIARIZATION_PREPARE_FAILED"),
+                )
+            raise DiarizationPrepareError(
+                "说话人识别组件响应类型异常",
+                code="DIARIZATION_PROTOCOL_ERROR",
+            )
+    finally:
+        _terminate_helper(process)
 
 
 def create_diarizer(

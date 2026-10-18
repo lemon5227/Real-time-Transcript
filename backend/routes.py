@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 
 from .config import AppConfig
 from .device import device_public_dict, get_device_profile
+from .diarization_models import DiarizationModelError
 from .fine_transcription import MAX_AUDIO_BYTES
 from .models import SessionConfig
 from .providers.base import ProviderError
@@ -105,6 +106,31 @@ def register_routes(app: Flask, config: AppConfig) -> None:
             model = manager.cancel_download(model_id)
         except KeyError:
             return jsonify({"error": "unknown model"}), 404
+        return jsonify({"model": model})
+
+    @app.get("/api/diarization/model")
+    def diarization_model():
+        manager = current_app.extensions["diarization_models"]
+        return jsonify({"model": manager.snapshot()})
+
+    @app.post("/api/diarization/model/download")
+    def download_diarization_model():
+        manager = current_app.extensions["diarization_models"]
+        try:
+            model = manager.start_download()
+        except DiarizationModelError as exc:
+            return jsonify({"model": manager.snapshot(), "error": str(exc), "code": exc.code}), 409
+        if model["status"] == "downloading":
+            return jsonify({"model": model}), 202
+        return jsonify({"model": model})
+
+    @app.delete("/api/diarization/model")
+    def delete_diarization_model():
+        manager = current_app.extensions["diarization_models"]
+        try:
+            model = manager.delete()
+        except DiarizationModelError as exc:
+            return jsonify({"model": manager.snapshot(), "error": str(exc), "code": exc.code}), 409
         return jsonify({"model": model})
 
     @app.get("/api/capabilities")

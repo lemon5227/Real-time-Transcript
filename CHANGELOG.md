@@ -14,10 +14,10 @@ Related documents:
 
 | | |
 | --- | --- |
-| Tests | **320 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
+| Tests | **336 passed**, 32 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
 | CI | Green on `f5ee023` (2026-10-15). Three pushes earlier that evening went red on a workflow-contract test still pinning `runs-on: macos-14`; the test now pins `macos-15` and the ASCII asset name |
-| Git | `origin/main` pushed through the 2026-10-15 release-chain work; annotated tag `v0.1.0` on `f5ee023` |
+| Git | `origin/main` pushed through the 2026-10-18 feature work (study summary, Nemotron model management); annotated tag `v0.1.0` on `f5ee023` |
 | Releases | `v0.1.0` — the first GitHub Release. Asset `shiju-macOS.dmg` (9.3 MB) from the `macOS DMG` workflow; downloaded, mounted, bundled sources hash-match the repo |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
 | Caption latency | Windowed batch decoding: captions land at the live edge (median ≈0 s), 0.24–0.31× realtime. The first-caption figure (8.3 s) was measured before the 2026-10-15 changes — re-measure with `tools/replay_lecture.py` |
@@ -32,6 +32,38 @@ Quick health check:
 .venv/bin/python -m ruff check .                            # lint
 curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.tool
 ```
+
+## 2026-10-18 — the model library can prepare and delete the Nemotron diarizer
+
+The second roadmap candidate from the same review landed the same day: the settings model library now manages
+the speaker-diarization weights instead of leaving the first download to the first `start` of a class.
+
+- New JSONL request `prepare` in the Swift helper: it downloads and compiles the requested preset, streaming
+  `download_progress` lines (`fraction` in `[0, 1]`) before `ready`. The live session path (`start` / `audio` /
+  `flush`) keeps exactly one response per request. Progress callbacks arrive on FluidAudio's own queue, so the
+  helper writes them through a lock (`ResponseWriter`).
+- `GET /api/diarization/model`, `POST /api/diarization/model/download` and `DELETE /api/diarization/model`
+  expose status, start the download, and delete the cache directory. Downloads run one at a time on a
+  background thread (`backend/diarization_models.py`); delete removes the whole
+  `…/FluidAudio/Models/nemotron-3-diarization` folder and is refused (409) while a download is running.
+- The drawer gains a "说话人识别 · Nemotron 3" card that reuses the transcription cards' status vocabulary
+  (`modelManagerStatus` / `modelManagerStatusKind`), progress bar, 变体/用途/占用/空间 grid, and button styling.
+  The page polls both model lists together while either one is downloading.
+- Boundaries kept as designed: no download cancel, no variant picker, transcription models untouched.
+
+Verification: 16 new tests (manager state machine with an injected fake prepare, provider streaming and error
+cases, route conflicts, native-source and frontend contracts), full suite **336 passed**, `ruff check .` and
+`node --check` clean. End-to-end against the real server (Playwright): deleted the real ~190 MB cache through
+the card (confirm dialog accepted), watched a real Hugging Face download run 0% → 36% → 100% with the disk row
+following (72 MB → 199 MB), ended at "已下载 · 可以使用", zero console errors. A real helper session then loaded
+the freshly downloaded weights (`start` → `ready` in 3.1 s). The cache was backed up before the walkthrough and
+the backup was dropped only after the reload check passed; the three card states were screenshot-checked against
+the drawer's visual language.
+
+One trap recorded for future JSONL work: `select` + `readline` on a text-mode pipe loses lines, because the
+text wrapper can read several lines into its buffer while `select` only ever sees the file descriptor go idle.
+The `prepare` client reads through a reader thread and a queue (`_stream_lines` in
+`backend/providers/diarization.py`) instead.
 
 ## 2026-10-18 — the review page gains a study-highlights summary (“本节重点”)
 

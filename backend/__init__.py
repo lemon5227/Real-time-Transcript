@@ -11,6 +11,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 from .config import AppConfig, load_config
+from .diarization_models import DiarizationModelManager, default_model_cache_root
 from .fine_transcription import FineTranscriptionManager
 from .logging_setup import configure_logging
 from .model_manager import ModelManager
@@ -94,6 +95,11 @@ def create_app(
     app.extensions["app_config"] = app_config
     app.extensions["session_manager"] = manager
     app.extensions["model_manager"] = model_manager
+    app.extensions["diarization_models"] = DiarizationModelManager(
+        command=app_config.diarization_command,
+        variant=app_config.diarization_variant,
+        cache_root=default_model_cache_root(environ),
+    )
     app.extensions["translation_router"] = translation_router
     app.extensions["fine_transcription_manager"] = fine_transcription_manager
     register_routes(app, app_config)

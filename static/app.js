@@ -57,6 +57,7 @@
     timer: null,
     capabilities: null,
     models: [],
+    diarizationModel: null,
     modelPollTimer: null,
     followPulseTimer: null,
     followScrollLock: false,
@@ -739,7 +740,34 @@
         '<p>' + escapeHtml(model.best_for || model.languages || "通用转录") + '</p></div>' +
         '<dl class="model-manager-meta"><div><dt>速度</dt><dd>' + escapeHtml(model.speed || "—") + '</dd></div><div><dt>质量</dt><dd>' + escapeHtml(model.quality || "—") + '</dd></div><div><dt>占用</dt><dd>' + escapeHtml(model.resource || "—") + '</dd></div><div><dt>空间</dt><dd>' + escapeHtml(model.size || "—") + '</dd></div></dl>' +
         progressMarkup + '</article>';
-    }).join("");
+    }).join("") + renderDiarizationCard();
+  }
+
+  function renderDiarizationCard() {
+    var model = state.diarizationModel;
+    if (!model) return "";
+    var statusKind = modelManagerStatusKind(model);
+    var action = "";
+    if (model.status === "downloading") {
+      action = "";
+    } else if (model.status === "ready") {
+      action = '<button class="model-manager-action is-outline" type="button" data-diarization-action="delete">删除</button>';
+    } else if (model.component_available) {
+      action = '<button class="model-manager-action" type="button" data-diarization-action="download">' + (model.status === "failed" ? "重试" : "预下载") + '</button>';
+    } else {
+      action = '<span class="model-manager-runtime">组件未安装</span>';
+    }
+    var hint = "课堂说话人区分 · FluidAudio 共享缓存";
+    if (model.status === "failed" && model.error) hint = model.error;
+    else if (model.status === "ready") hint = "课堂说话人区分 · 已在本机缓存";
+    var progress = Math.max(0, Math.min(100, Number(model.progress) || 0));
+    var progressMarkup = model.status === "downloading" ? '<div class="model-manager-progress" role="progressbar" aria-label="说话人模型下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + progress + '"><span style="width:' + progress + '%"></span></div>' : "";
+    return '<article class="model-manager-card is-status-' + statusKind + '">' +
+      '<div class="model-manager-card-top"><div class="model-manager-status"><span class="model-manager-status-dot" data-status="' + statusKind + '" aria-hidden="true"></span><span>' + modelManagerStatus(model) + '</span></div><div class="model-manager-actions">' + action + '</div></div>' +
+      '<div class="model-manager-main"><div class="model-manager-title"><strong>说话人识别 · Nemotron 3</strong><span class="model-runtime-tag">Swift · CoreML</span></div>' +
+      '<p>' + escapeHtml(hint) + '</p></div>' +
+      '<dl class="model-manager-meta"><div><dt>变体</dt><dd>' + escapeHtml(model.variant || "low") + '</dd></div><div><dt>用途</dt><dd>课堂说话人区分</dd></div><div><dt>占用</dt><dd>中</dd></div><div><dt>空间</dt><dd>' + (model.downloaded_bytes ? escapeHtml(formatBytes(model.downloaded_bytes)) : "—") + '</dd></div></dl>' +
+      progressMarkup + '</article>';
   }
 
   function renderReadiness() {
@@ -771,15 +799,62 @@
         syncRuntimeModelSelection();
         renderModelManagement();
         renderReadiness();
-        var downloading = state.models.some(function (model) { return model.status === "downloading"; });
-        if (downloading && !state.modelPollTimer) state.modelPollTimer = window.setInterval(fetchModels, 750);
-        if (!downloading && state.modelPollTimer) { window.clearInterval(state.modelPollTimer); state.modelPollTimer = null; }
+        fetchDiarizationModel();
+        syncModelPolling();
         return data;
       })
       .catch(function () {
         $("#model-readiness-status").textContent = "模型状态暂不可用，请检查后端";
         renderReadiness();
       });
+  }
+
+  function fetchDiarizationModel() {
+    return fetch("/api/diarization/model")
+      .then(function (response) { if (!response.ok) throw new Error("diarization model request failed"); return response.json(); })
+      .then(function (data) {
+        state.diarizationModel = data.model || null;
+        renderModelManagement();
+        syncModelPolling();
+        return data;
+      })
+      .catch(function () {
+        state.diarizationModel = null;
+        renderModelManagement();
+      });
+  }
+
+  function syncModelPolling() {
+    var downloading = state.models.some(function (model) { return model.status === "downloading"; }) ||
+      Boolean(state.diarizationModel && state.diarizationModel.status === "downloading");
+    if (downloading && !state.modelPollTimer) state.modelPollTimer = window.setInterval(refreshModelLibrary, 750);
+    if (!downloading && state.modelPollTimer) { window.clearInterval(state.modelPollTimer); state.modelPollTimer = null; }
+  }
+
+  function refreshModelLibrary() {
+    fetchModels();
+    fetchDiarizationModel();
+  }
+
+  function downloadDiarizationModel() {
+    if (state.recording || state.starting) return;
+    fetch("/api/diarization/model/download", { method: "POST" })
+      .then(function (response) {
+        return response.json().then(function (data) { if (!response.ok && response.status !== 202) throw new Error(data.error || "模型操作失败"); return data; });
+      })
+      .then(function () { return fetchDiarizationModel(); })
+      .catch(function (error) { showError("模型操作失败", error.message, "download-model"); });
+  }
+
+  function deleteDiarizationModel() {
+    if (state.recording || state.starting) return;
+    if (!window.confirm("删除本机已下载的说话人模型？删除后下次使用前需要重新下载（约 190MB）。")) return;
+    fetch("/api/diarization/model", { method: "DELETE" })
+      .then(function (response) {
+        return response.json().then(function (data) { if (!response.ok) throw new Error(data.error || "模型操作失败"); return data; });
+      })
+      .then(function () { return fetchDiarizationModel(); })
+      .catch(function (error) { showError("模型操作失败", error.message, "download-model"); });
   }
 
   function downloadSelectedModel() {
@@ -846,6 +921,12 @@
     settingsDrawer.addEventListener("close", function () { document.body.classList.remove("settings-open"); });
     settingsDrawer.addEventListener("click", function (event) { if (event.target === settingsDrawer) close(); });
     if (modelManagementList) modelManagementList.addEventListener("click", function (event) {
+      var diarizationButton = event.target.closest("[data-diarization-action]");
+      if (diarizationButton) {
+        if (diarizationButton.dataset.diarizationAction === "download") downloadDiarizationModel();
+        if (diarizationButton.dataset.diarizationAction === "delete") deleteDiarizationModel();
+        return;
+      }
       var button = event.target.closest("[data-model-action]");
       if (!button) return;
       var modelId = button.dataset.modelId;
@@ -1968,7 +2049,7 @@
   setupTranscriptFollow();
   setupSocket();
   setAppPhase("checking", "正在检查听课条件", "马上告诉你是否可以开始");
-  Promise.all([loadCapabilities(), fetchModels()]).then(function () {
+  Promise.all([loadCapabilities(), fetchModels(), fetchDiarizationModel()]).then(function () {
     var waitingForConnection = !state.connected && state.phase === "waiting";
     setAppPhase(state.connected ? "idle" : waitingForConnection ? "waiting" : "checking", state.connected ? "实时连接已就绪" : "等待实时连接", $("#model-status").textContent);
     renderReadiness();

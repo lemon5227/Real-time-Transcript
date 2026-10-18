@@ -6,9 +6,11 @@ import pytest
 
 from backend.providers.base import ProviderError
 from backend.providers.diarization import (
+    DiarizationPrepareError,
     JsonlNemotronDiarizer,
     NullSpeakerDiarizer,
     create_diarizer,
+    prepare_nemotron_models,
 )
 
 HELPER = r'''
@@ -36,6 +38,59 @@ def helper_command(tmp_path, source=HELPER):
     path = tmp_path / "helper.py"
     path.write_text(source, encoding="utf-8")
     return [sys.executable, str(path)]
+
+
+PREPARE_HELPER = r'''
+import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["type"] == "prepare":
+        print(json.dumps({"type": "download_progress", "fraction": 0.25}), flush=True)
+        print(json.dumps({"type": "download_progress", "fraction": 0.75}), flush=True)
+        print(json.dumps({"type": "ready", "variant": request["variant"]}), flush=True)
+    elif request["type"] == "stop":
+        print(json.dumps({"type": "stopped"}), flush=True)
+        break
+'''
+
+PREPARE_FAILURE_HELPER = r'''
+import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["type"] == "prepare":
+        print(json.dumps({"type": "error", "code": "DIARIZATION_MODEL_UNAVAILABLE", "message": "模型下载失败"}), flush=True)
+    elif request["type"] == "stop":
+        print(json.dumps({"type": "stopped"}), flush=True)
+        break
+'''
+
+
+def test_prepare_streams_download_progress_until_ready(tmp_path):
+    progress = []
+    prepare_nemotron_models(
+        helper_command(tmp_path, PREPARE_HELPER),
+        variant="low",
+        on_progress=progress.append,
+    )
+    assert progress == [0.25, 0.75]
+
+
+def test_prepare_surfaces_helper_errors(tmp_path):
+    with pytest.raises(DiarizationPrepareError) as excinfo:
+        prepare_nemotron_models(helper_command(tmp_path, PREPARE_FAILURE_HELPER))
+
+    assert excinfo.value.code == "DIARIZATION_MODEL_UNAVAILABLE"
+    assert "模型下载失败" in str(excinfo.value)
+
+
+def test_prepare_rejects_a_missing_command():
+    with pytest.raises(DiarizationPrepareError) as excinfo:
+        prepare_nemotron_models("")
+    assert excinfo.value.code == "DIARIZATION_HELPER_UNAVAILABLE"
 
 
 def test_jsonl_helper_round_trips_audio_and_speaker_turns(tmp_path):

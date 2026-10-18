@@ -39,6 +39,7 @@ private struct Response: Encodable {
     let code: String?
     let message: String?
     let turns: [SpeakerTurn]?
+    let fraction: Double?
 
     init(
         type: String,
@@ -46,7 +47,8 @@ private struct Response: Encodable {
         model: String? = nil,
         code: String? = nil,
         message: String? = nil,
-        turns: [SpeakerTurn]? = nil
+        turns: [SpeakerTurn]? = nil,
+        fraction: Double? = nil
     ) {
         self.type = type
         self.variant = variant
@@ -54,6 +56,28 @@ private struct Response: Encodable {
         self.code = code
         self.message = message
         self.turns = turns
+        self.fraction = fraction
+    }
+}
+
+/// Thread-safe stdout writer for progress callbacks that FluidAudio may invoke
+/// off the main actor while a `prepare` request is in flight.
+private final class ResponseWriter: @unchecked Sendable {
+    private let lock = NSLock()
+
+    func write(_ response: Response) {
+        do {
+            var data = try JSONEncoder().encode(response)
+            data.append(0x0A)
+            lock.lock()
+            FileHandle.standardOutput.write(data)
+            lock.unlock()
+        } catch {
+            let fallback = "{\"type\":\"error\",\"code\":\"DIARIZATION_PROTOCOL_ERROR\",\"message\":\"编码响应失败\"}\n"
+            lock.lock()
+            FileHandle.standardOutput.write(Data(fallback.utf8))
+            lock.unlock()
+        }
     }
 }
 
@@ -101,6 +125,8 @@ struct NemotronDiarizerService {
                 switch request.type {
                 case "start":
                     try await start(request)
+                case "prepare":
+                    try await prepare(request)
                 case "audio":
                     try processAudio(request)
                 case "flush":
@@ -140,32 +166,62 @@ struct NemotronDiarizerService {
         }
     }
 
-    private func loadModels(config: Nemotron3Config) async throws -> Nemotron3Models {
-        let environment = ProcessInfo.processInfo.environment
-        let cacheDirectory: URL?
-        if let configured = environment["NEMOTRON_MODEL_DIR"], !configured.isEmpty {
-            let url = URL(fileURLWithPath: configured, isDirectory: true)
-            if url.lastPathComponent == "nemotron-3-diarization" {
-                cacheDirectory = url.deletingLastPathComponent()
-            } else {
-                cacheDirectory = url
-            }
-        } else {
-            cacheDirectory = nil
+    /// Download and compile the preset without starting a session, so the
+    /// settings page can prepare the model ahead of class.
+    ///
+    /// Progress lines are only legal under `prepare`; the session requests keep
+    /// their one-response-per-request contract.
+    private func prepare(_ request: Request) async throws {
+        let requestedVariant = request.variant?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let variant = requestedVariant?.isEmpty == false ? requestedVariant! : "low"
+        guard let config = Nemotron3Config.preset(named: variant) else {
+            throw ServiceError.invalidRequest("不支持的 Nemotron variant: \(variant)")
         }
-        let computeUnits: MLComputeUnits = {
-            switch environment["NEMOTRON_COMPUTE_UNITS"]?.lowercased() {
-            case "ane": return .cpuAndNeuralEngine
-            case "gpu": return .cpuAndGPU
-            case "cpu": return .cpuOnly
-            default: return .all
-            }
-        }()
+        let writer = ResponseWriter()
+        do {
+            _ = try await Nemotron3Models.loadFromHuggingFace(
+                config: config,
+                cacheDirectory: modelCacheDirectory(),
+                computeUnits: configuredComputeUnits(),
+                progressHandler: { progress in
+                    writer.write(
+                        Response(type: "download_progress", fraction: progress.fractionCompleted)
+                    )
+                }
+            )
+        } catch {
+            throw ServiceError.modelUnavailable(error.localizedDescription)
+        }
+        writer.write(Response(type: "ready", variant: variant, model: "Nemotron-3-Diarization"))
+    }
+
+    private func loadModels(config: Nemotron3Config) async throws -> Nemotron3Models {
         return try await Nemotron3Models.loadFromHuggingFace(
             config: config,
-            cacheDirectory: cacheDirectory,
-            computeUnits: computeUnits
+            cacheDirectory: modelCacheDirectory(),
+            computeUnits: configuredComputeUnits()
         )
+    }
+
+    private func modelCacheDirectory() -> URL? {
+        let environment = ProcessInfo.processInfo.environment
+        guard let configured = environment["NEMOTRON_MODEL_DIR"], !configured.isEmpty else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: configured, isDirectory: true)
+        if url.lastPathComponent == "nemotron-3-diarization" {
+            return url.deletingLastPathComponent()
+        }
+        return url
+    }
+
+    private func configuredComputeUnits() -> MLComputeUnits {
+        switch ProcessInfo.processInfo.environment["NEMOTRON_COMPUTE_UNITS"]?.lowercased() {
+        case "ane": return .cpuAndNeuralEngine
+        case "gpu": return .cpuAndGPU
+        case "cpu": return .cpuOnly
+        default: return .all
+        }
     }
 
     private mutating func processAudio(_ request: Request) throws {
