@@ -686,6 +686,25 @@ button.star-toggle:hover, .review-segment.is-starred button.star-toggle { color:
 .review-translation-label { flex: 0 0 auto; padding-top: 2px; color: var(--mint-deep); font-family: var(--mono); font-size: 8px; letter-spacing: .08em; }
 .review-translation-copy { min-width: 0; }
 
+/* Study highlights: the review page's own recap of what was starred or noted. */
+.review-highlights { margin: 0 0 14px; padding: 17px; background: rgba(255, 253, 249, .68); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 22px rgba(11, 16, 32, .035); }
+.review-highlights-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.review-highlights-heading h3 { margin: 5px 0 0; color: var(--ink); font-family: var(--serif); font-size: 21px; font-weight: 500; }
+.review-highlights-actions { display: flex; align-items: center; gap: 9px; padding-top: 4px; }
+.highlights-count { color: var(--ink-muted); font-family: var(--mono); font-size: 9px; white-space: nowrap; }
+.highlights-list { display: grid; }
+.highlight-entry { padding: 12px 2px 11px; border-top: 1px solid var(--line); }
+.highlight-entry:first-child { padding-top: 2px; border-top: 0; }
+.highlight-entry-head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.highlight-entry-head time { color: var(--mint-deep); cursor: pointer; font-family: var(--mono); font-size: 9px; }
+.highlight-entry-head time:hover { text-decoration: underline; text-underline-offset: 3px; }
+.highlight-star { padding: 3px 8px; color: #9b672f; background: rgba(255, 199, 125, .18); border: 1px solid rgba(217, 150, 84, .28); border-radius: 999px; font-size: 9px; }
+.highlight-entry-text { margin: 0; color: var(--ink); font-family: var(--serif); font-size: 15px; line-height: 1.5; }
+.highlight-entry .review-translation-line { margin: 8px 0 0; font-size: 13px; }
+.highlight-entry-note { display: flex; gap: 9px; margin: 7px 0 0; color: var(--ink-muted); font-family: var(--serif); font-size: 11px; line-height: 1.5; }
+.highlight-entry-note > span:first-child { flex: 0 0 auto; padding-top: 2px; color: var(--mint-deep); font-family: var(--mono); font-size: 8px; letter-spacing: .1em; }
+.highlights-empty { margin: 0; padding: 12px 13px; color: var(--ink-muted); background: rgba(112, 224, 192, .07); border: 1px solid rgba(44, 158, 134, .16); border-radius: 8px; font-family: var(--serif); font-size: 12px; line-height: 1.5; }
+
 @media (max-width: 760px) {
   .review-tools-row { grid-template-columns: 1fr; gap: 11px; }
   .review-tool { min-height: 0; }
@@ -693,6 +712,10 @@ button.star-toggle:hover, .review-segment.is-starred button.star-toggle { color:
   .translation-tool-main .tool-primary-button { width: 100%; }
   .review-tool-heading .refinement-status, .review-tool-heading .translation-status { white-space: normal; text-align: right; }
   .review-selection-toolbar { position: sticky; bottom: 8px; z-index: 2; }
+  .review-highlights { padding: 13px; }
+  .review-highlights-heading { flex-wrap: wrap; gap: 8px; }
+  .review-highlights-actions { width: 100%; justify-content: space-between; }
+  .review-highlights .toolbar-action-button { min-height: 34px; }
 }
 
 @media (min-width: 761px) and (max-width: 900px) {

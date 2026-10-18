@@ -71,7 +71,24 @@
     return lines.join("\n") + "\n";
   }
 
-  root.EchoExport = { formatVtt: formatVtt, formatSrt: formatSrt, formatMarkdown: formatMarkdown, formatPlainText: formatPlainText, timestamp: timestamp, segmentText: segmentText };
+  function formatStudySummary(session, options) {
+    var record = session || {};
+    var settings = options || {};
+    var segments = settings.segments || record.segments || [];
+    var lines = ["# 本节重点 · " + (record.title || "未命名课堂"), ""];
+    var entries = [];
+    segments.forEach(function (segment) {
+      var note = String(segment.note || "").trim();
+      if (!segment.starred && !note) return;
+      var marker = segment.starred ? " ★" : "";
+      var noteLine = note ? "\n\n> 笔记：" + note : "";
+      entries.push("**[" + segmentTimestamp(segment, "startMs", ".") + "]**" + marker, "", segmentText(segment, settings) + noteLine, "");
+    });
+    if (!entries.length) return lines.concat("这节课还没有标记或笔记。", "").join("\n");
+    return lines.concat(entries).join("\n");
+  }
+
+  root.EchoExport = { formatVtt: formatVtt, formatSrt: formatSrt, formatMarkdown: formatMarkdown, formatPlainText: formatPlainText, formatStudySummary: formatStudySummary, timestamp: timestamp, segmentText: segmentText };
   root.formatVtt = formatVtt;
   root.formatSrt = formatSrt;
   root.formatMarkdown = formatMarkdown;

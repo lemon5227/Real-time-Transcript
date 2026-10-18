@@ -431,6 +431,27 @@ def test_mac_runtime_install_and_ui_contracts():
         assert hook in javascript or hook in html
 
 
+def test_review_page_exposes_a_study_highlights_summary():
+    """复习页要能把手动标星和落笔笔记汇总成一份可复制、可回听的"本节重点"。"""
+    app = create_app({})
+    client = app.test_client()
+    html = client.get("/review").get_data(as_text=True)
+    javascript = client.get("/static/review.js").get_data(as_text=True)
+    export = client.get("/static/export.js").get_data(as_text=True)
+    stylesheet = client.get("/static/styles.css").get_data(as_text=True)
+
+    for hook in ["reviewHighlights", "highlightsList", "highlights-count", "copy-highlights"]:
+        assert hook in html
+    # 摘要在完整字幕流之前：先看标过的重点，再进入全程字幕。
+    assert html.index("reviewHighlights") < html.index("reviewStream")
+    for hook in ["renderHighlights();", "highlightEntries", "seekHighlightEntry", "navigator.clipboard"]:
+        assert hook in javascript
+    for hook in ["formatStudySummary", "本节重点"]:
+        assert hook in export
+    for hook in [".review-highlights", ".highlight-entry", ".highlight-star", ".highlights-empty"]:
+        assert hook in stylesheet
+
+
 def test_frontend_drops_a_caption_the_server_retracts():
     """The live feed must handle the removal event, not only add-or-update.
 

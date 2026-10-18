@@ -10,14 +10,14 @@ Related documents:
 - [`docs/LATENCY.md`](docs/LATENCY.md) — caption latency measurements and tuning knobs.
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — symptoms an operator sees, in plain language.
 
-## Current state — 2026-10-15
+## Current state — 2026-10-18
 
 | | |
 | --- | --- |
-| Tests | **319 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
+| Tests | **320 passed**, 31 test files — on this machine's `.venv`; CI, which installs `requirements-dev.txt` alone, is green on `f5ee023` |
 | Lint | `ruff check .` clean. The vendored Swift checkouts under `native/` carry ~1,000 third-party Python files; `.gitignore` now excludes SPM build trees so they are neither linted nor committed |
 | CI | Green on `f5ee023` (2026-10-15). Three pushes earlier that evening went red on a workflow-contract test still pinning `runs-on: macos-14`; the test now pins `macos-15` and the ASCII asset name |
-| Git | `main`, pushed to `origin`; annotated tag `v0.1.0` on `f5ee023` |
+| Git | `origin/main` pushed through the 2026-10-15 release-chain work; annotated tag `v0.1.0` on `f5ee023` |
 | Releases | `v0.1.0` — the first GitHub Release. Asset `shiju-macOS.dmg` (9.3 MB) from the `macOS DMG` workflow; downloaded, mounted, bundled sources hash-match the repo |
 | Working path | Apple Silicon + MLX Parakeet. `faster_whisper`/`whisper` are not installed, and no `CLOUD_*` is configured, so those paths are untested on this machine |
 | Caption latency | Windowed batch decoding: captions land at the live edge (median ≈0 s), 0.24–0.31× realtime. The first-caption figure (8.3 s) was measured before the 2026-10-15 changes — re-measure with `tools/replay_lecture.py` |
@@ -32,6 +32,34 @@ Quick health check:
 .venv/bin/python -m ruff check .                            # lint
 curl -s --noproxy '*' http://127.0.0.1:5001/api/capabilities | python3 -m json.tool
 ```
+
+## 2026-10-18 — the review page gains a study-highlights summary (“本节重点”)
+
+The roadmap's first candidate (a lightweight study recap built from starred moments and notes) landed early, and
+deliberately cheap: no AI generation, no backend change — the review page only re-organizes data it already has.
+
+- A “本节重点” card now sits between the tools row and the full transcript. It merges every segment with a
+  star or a non-empty note into one chronological list: clickable timestamp (seeks the saved audio and scrolls
+  the matching transcript card into view, same behavior as the transcript's own timestamps), original text,
+  ready translation for the active target, and the note. Starred rows carry the amber “★ 重点” badge.
+- “复制摘要” writes Markdown via the new `EchoExport.formatStudySummary()`; it follows the existing export
+  translation mode (original / bilingual / translated) and the existing `> 笔记：` convention, titled
+  `# 本节重点 · course`.
+- The summary follows the active transcript version and updates live on star toggles, note edits, text edits,
+  translation results, and version switches. Empty sessions show a one-line hint instead of an empty card.
+- Visuals reuse the existing design language — kicker, serif heading, mono count, mint timestamps, amber star
+  badge, the transcript's own translation-line classes — rather than introducing new tokens.
+
+Boundary kept as designed: refined transcripts keep their own segment records, so in refined view the summary
+counts marks made there (usually none until the user stars refined lines); the summary itself is read-only and
+editing stays in the transcript.
+
+Verification: new contract test `test_review_page_exposes_a_study_highlights_summary`; full suite **320 passed**,
+`ruff check .` clean, `node --check` clean. Real-browser walkthrough against the local server (Playwright,
+seeded lecture with stars / notes / a ready translation): 3 entries and correct counts, copied Markdown matched
+the expectation, starring and un-starring a transcript row added and removed summary entries live, clicking a
+summary timestamp brought the matching transcript card into the viewport, zero console errors. Desktop and
+mobile screenshots were checked against the page's visual language.
 
 ## 2026-10-15 — the DMG workflow had not survived the diarizer integration; the first Release
 

@@ -55,6 +55,10 @@
                 </section>
               </div>
               <div class="review-selection-toolbar" id="review-selection-toolbar" hidden role="toolbar" aria-label="批量字幕操作"><span id="review-selected-count">已选择 0 段</span><button id="clear-segment-selection" class="toolbar-action-button" type="button">清除选择</button></div>
+              <section class="review-highlights" id="reviewHighlights" aria-labelledby="review-highlights-title" hidden>
+                <div class="review-highlights-heading"><div><span class="detail-kicker">KEY POINTS / 本节重点</span><h3 id="review-highlights-title">标过的地方都在这里</h3></div><div class="review-highlights-actions"><span id="highlights-count" class="highlights-count">还没有标记</span><button id="copy-highlights" class="toolbar-action-button" type="button" hidden>复制摘要</button></div></div>
+                <div id="highlightsList" class="highlights-list"></div>
+              </section>
               <div class="review-stream-heading"><span class="detail-kicker">TRANSCRIPT / 字幕</span><span id="review-transcript-source" class="transcript-source-label">实时稿 · 上课同步记录</span></div>
               <div id="reviewStream" class="review-stream" data-note-input="noteInput"></div>
             </div>
